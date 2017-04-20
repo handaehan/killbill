@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,27 +18,27 @@
 
 package org.killbill.billing.invoice;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
-
 import org.killbill.billing.GuicyKillbillTestSuiteNoDB;
-import org.killbill.billing.TestKillbillConfigSource;
 import org.killbill.billing.account.api.AccountInternalApi;
 import org.killbill.billing.currency.api.CurrencyConversionApi;
 import org.killbill.billing.invoice.api.InvoiceInternalApi;
-import org.killbill.billing.invoice.api.InvoiceMigrationApi;
 import org.killbill.billing.invoice.api.InvoicePaymentApi;
 import org.killbill.billing.invoice.api.InvoiceUserApi;
+import org.killbill.billing.invoice.api.formatters.ResourceBundleFactory;
 import org.killbill.billing.invoice.dao.InvoiceDao;
+import org.killbill.billing.invoice.dao.InvoiceDaoHelper;
+import org.killbill.billing.invoice.generator.FixedAndRecurringInvoiceItemGenerator;
 import org.killbill.billing.invoice.generator.InvoiceGenerator;
 import org.killbill.billing.invoice.glue.TestInvoiceModuleNoDB;
+import org.killbill.billing.invoice.usage.RawUsageOptimizer;
 import org.killbill.billing.junction.BillingInternalApi;
+import org.killbill.billing.lifecycle.api.BusService;
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
-import org.killbill.billing.util.KillbillConfigSource;
+import org.killbill.billing.usage.api.UsageUserApi;
 import org.killbill.billing.util.api.TagUserApi;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
-import org.killbill.billing.util.svcsapi.bus.BusService;
 import org.killbill.bus.api.PersistentBus;
 import org.killbill.clock.Clock;
 import org.killbill.commons.locker.GlobalLocker;
@@ -63,8 +65,6 @@ public abstract class InvoiceTestSuiteNoDB extends GuicyKillbillTestSuiteNoDB {
     @Inject
     protected InvoicePaymentApi invoicePaymentApi;
     @Inject
-    protected InvoiceMigrationApi migrationApi;
-    @Inject
     protected InvoiceGenerator generator;
     @Inject
     protected BillingInternalApi billingApi;
@@ -90,10 +90,19 @@ public abstract class InvoiceTestSuiteNoDB extends GuicyKillbillTestSuiteNoDB {
     protected TestInvoiceHelper invoiceUtil;
     @Inject
     protected CurrencyConversionApi currencyConversionApi;
-
+    @Inject
+    protected UsageUserApi usageUserApi;
+    @Inject
+    protected ResourceBundleFactory resourceBundleFactory;
+    @Inject
+    protected RawUsageOptimizer rawUsageOptimizer;
+    @Inject
+    protected InvoiceDaoHelper invoiceDaoHelper;
+    @Inject
+    protected FixedAndRecurringInvoiceItemGenerator fixedAndRecurringInvoiceItemGenerator;
     @Override
-    protected KillbillConfigSource getConfigSource() throws IOException, URISyntaxException {
-        return new TestKillbillConfigSource("/resource.properties");
+    protected KillbillConfigSource getConfigSource() {
+        return getConfigSource("/resource.properties");
     }
 
     @BeforeClass(groups = "fast")

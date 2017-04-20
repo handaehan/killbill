@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -18,58 +20,82 @@ package org.killbill.billing.payment;
 
 import java.util.UUID;
 
+import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-import org.mockito.Mockito;
-
+import org.killbill.billing.GuicyKillbillTestSuite;
+import org.killbill.billing.GuicyKillbillTestSuiteNoDB;
 import org.killbill.billing.account.api.Account;
-import org.killbill.bus.api.PersistentBus;
-import org.killbill.bus.api.PersistentBus.EventBusException;
+import org.killbill.billing.account.api.AccountInternalApi;
+import org.killbill.billing.account.api.AccountUserApi;
+import org.killbill.billing.account.api.ImmutableAccountInternalApi;
+import org.killbill.billing.callcontext.InternalCallContext;
+import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.callcontext.MutableInternalCallContext;
 import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.events.InvoiceCreationInternalEvent;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
+import org.killbill.billing.invoice.api.InvoiceInternalApi;
 import org.killbill.billing.invoice.api.InvoiceItem;
+import org.killbill.billing.mock.MockAccountBuilder;
 import org.killbill.billing.payment.api.PaymentApi;
 import org.killbill.billing.payment.api.PaymentMethodPlugin;
+import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.provider.DefaultNoOpPaymentMethodPlugin;
 import org.killbill.billing.payment.provider.MockPaymentProviderPlugin;
 import org.killbill.billing.util.callcontext.CallContext;
-import org.killbill.billing.callcontext.InternalCallContext;
-import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.dao.NonEntityDao;
+import org.killbill.bus.api.PersistentBus;
+import org.killbill.bus.api.PersistentBus.EventBusException;
 import org.killbill.clock.Clock;
-import org.killbill.billing.events.InvoiceCreationInternalEvent;
-import org.killbill.billing.account.api.AccountInternalApi;
-import org.killbill.billing.invoice.api.InvoiceInternalApi;
+import org.mockito.Mockito;
 
+import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
 
 public class TestPaymentHelper {
 
-    protected final AccountInternalApi AccountApi;
+    protected final AccountUserApi accountApi;
+    protected final AccountInternalApi accountInternalApi;
+    protected final ImmutableAccountInternalApi immutableAccountInternalApi;
     protected final InvoiceInternalApi invoiceApi;
-    protected PaymentApi paymentApi;
     private final PersistentBus eventBus;
     private final Clock clock;
-
+    private final NonEntityDao nonEntityDao;
+    private final MutableInternalCallContext internalCallContext;
+    private final InternalCallContextFactory internalCallContextFactory;
     private final CallContext context;
-    private final InternalCallContext internalCallContext;
+    protected PaymentApi paymentApi;
 
     @Inject
-    public TestPaymentHelper(final AccountInternalApi AccountApi, final InvoiceInternalApi invoiceApi,
-                             final PaymentApi paymentApi, final PersistentBus eventBus, final Clock clock,
-                             final CallContext context, final InternalCallContext internalCallContext) {
+    public TestPaymentHelper(final AccountUserApi accountApi,
+                             final AccountInternalApi accountInternalApi,
+                             final ImmutableAccountInternalApi immutableAccountInternalApi,
+                             final InvoiceInternalApi invoiceApi,
+                             final PaymentApi paymentApi,
+                             final PersistentBus eventBus,
+                             final Clock clock,
+                             final NonEntityDao nonEntityDao,
+                             final MutableInternalCallContext internalCallContext,
+                             final InternalCallContextFactory internalCallContextFactory,
+                             final CallContext context) {
+        this.accountApi = accountApi;
         this.eventBus = eventBus;
-        this.AccountApi = AccountApi;
+        this.accountInternalApi = accountInternalApi;
+        this.immutableAccountInternalApi = immutableAccountInternalApi;
         this.invoiceApi = invoiceApi;
         this.paymentApi = paymentApi;
         this.clock = clock;
-        this.context = context;
+        this.nonEntityDao = nonEntityDao;
         this.internalCallContext = internalCallContext;
+        this.internalCallContextFactory = internalCallContextFactory;
+        this.context = context;
     }
 
     public Invoice createTestInvoice(final Account account,
                                      final LocalDate targetDate,
                                      final Currency currency,
-                                     final CallContext context,
                                      final InvoiceItem... items) throws EventBusException, InvoiceApiException {
         final Invoice invoice = new MockInvoice(account.getId(), clock.getUTCToday(), targetDate, currency);
 
@@ -82,6 +108,7 @@ public class TestPaymentHelper {
                                                                     recurringInvoiceItem.getSubscriptionId(),
                                                                     recurringInvoiceItem.getPlanName(),
                                                                     recurringInvoiceItem.getPhaseName(),
+                                                                    null,
                                                                     recurringInvoiceItem.getStartDate(),
                                                                     recurringInvoiceItem.getEndDate(),
                                                                     recurringInvoiceItem.getAmount(),
@@ -91,9 +118,12 @@ public class TestPaymentHelper {
         }
 
         Mockito.when(invoiceApi.getInvoiceById(Mockito.eq(invoice.getId()), Mockito.<InternalTenantContext>any())).thenReturn(invoice);
+        Mockito.when(invoiceApi.getInvoiceForPaymentId(Mockito.<UUID>any(), Mockito.<InternalCallContext>any())).thenReturn(invoice);
+
         final InvoiceCreationInternalEvent event = new MockInvoiceCreationEvent(invoice.getId(), invoice.getAccountId(),
                                                                                 invoice.getBalance(), invoice.getCurrency(),
-                                                                                invoice.getInvoiceDate(), 1L, 2L, null);
+                                                                                invoice.getInvoiceDate(), internalCallContext.getAccountRecordId(),
+                                                                                internalCallContext.getTenantRecordId(), null);
 
         eventBus.post(event);
         return invoice;
@@ -103,30 +133,55 @@ public class TestPaymentHelper {
         final String name = "First" + UUID.randomUUID().toString() + " " + "Last" + UUID.randomUUID().toString();
         final String externalKey = UUID.randomUUID().toString();
 
-        final Account account = Mockito.mock(Account.class);
-        Mockito.when(account.getId()).thenReturn(UUID.randomUUID());
-        Mockito.when(account.getExternalKey()).thenReturn(externalKey);
-        Mockito.when(account.getName()).thenReturn(name);
-        Mockito.when(account.getFirstNameLength()).thenReturn(10);
-        Mockito.when(account.getPhone()).thenReturn("123-456-7890");
-        Mockito.when(account.getEmail()).thenReturn(email);
-        Mockito.when(account.getCurrency()).thenReturn(Currency.USD);
-        Mockito.when(account.getBillCycleDayLocal()).thenReturn(1);
-        Mockito.when(account.isMigrated()).thenReturn(false);
-        Mockito.when(account.isNotifiedForInvoices()).thenReturn(false);
+        final Account accountData = Mockito.mock(Account.class);
+        Mockito.when(accountData.getId()).thenReturn(UUID.randomUUID());
+        Mockito.when(accountData.getExternalKey()).thenReturn(externalKey);
+        Mockito.when(accountData.getName()).thenReturn(name);
+        Mockito.when(accountData.getFirstNameLength()).thenReturn(10);
+        Mockito.when(accountData.getPhone()).thenReturn("123-456-7890");
+        Mockito.when(accountData.getEmail()).thenReturn(email);
+        Mockito.when(accountData.getCurrency()).thenReturn(Currency.USD);
+        Mockito.when(accountData.getBillCycleDayLocal()).thenReturn(1);
+        Mockito.when(accountData.isMigrated()).thenReturn(false);
+        Mockito.when(accountData.isNotifiedForInvoices()).thenReturn(false);
+        Mockito.when(accountData.getTimeZone()).thenReturn(DateTimeZone.UTC);
+        Mockito.when(accountData.getCreatedDate()).thenReturn(clock.getUTCNow());
 
-        Mockito.when(AccountApi.getAccountById(Mockito.<UUID>any(), Mockito.<InternalTenantContext>any())).thenReturn(account);
-        Mockito.when(AccountApi.getAccountByKey(Mockito.anyString(), Mockito.<InternalTenantContext>any())).thenReturn(account);
+        Account account;
+        if (isFastTest()) {
+            account = GuicyKillbillTestSuiteNoDB.createMockAccount(accountData, accountApi, accountInternalApi, immutableAccountInternalApi, nonEntityDao, clock, internalCallContextFactory, context, internalCallContext);
+        } else {
+            account = accountApi.createAccount(accountData, context);
+        }
+
+        GuicyKillbillTestSuite.refreshCallContext(account.getId(), clock, internalCallContextFactory, context, internalCallContext);
 
         if (addPaymentMethod) {
             final PaymentMethodPlugin pm = new DefaultNoOpPaymentMethodPlugin(UUID.randomUUID().toString(), true, null);
-            addTestPaymentMethod(account, pm);
+            account = addTestPaymentMethod(account, pm);
         }
+
         return account;
     }
 
-    public void addTestPaymentMethod(final Account account, final PaymentMethodPlugin paymentMethodInfo) throws Exception {
-        final UUID paymentMethodId = paymentApi.addPaymentMethod(MockPaymentProviderPlugin.PLUGIN_NAME, account, true, paymentMethodInfo, context);
-        Mockito.when(account.getPaymentMethodId()).thenReturn(paymentMethodId);
+    public Account addTestPaymentMethod(final Account account, final PaymentMethodPlugin paymentMethodInfo) throws Exception {
+        return addTestPaymentMethod(account, paymentMethodInfo, ImmutableList.<PluginProperty>of());
+    }
+
+    public Account addTestPaymentMethod(final Account account, final PaymentMethodPlugin paymentMethodInfo, final Iterable<PluginProperty> pluginProperties) throws Exception {
+        final UUID paymentMethodId = paymentApi.addPaymentMethod(account, paymentMethodInfo.getExternalPaymentMethodId(), MockPaymentProviderPlugin.PLUGIN_NAME, true, paymentMethodInfo, pluginProperties, context);
+        if (isFastTest()) {
+            final Account account1 = new MockAccountBuilder(account).paymentMethodId(paymentMethodId).build();
+            accountApi.updateAccount(account, context);
+            return account1;
+        } else {
+            // To reflect the payment method id change
+            return accountApi.getAccountById(account.getId(), context);
+        }
+    }
+
+    // Unfortunately, this helper is shared across fast and slow tests
+    private boolean isFastTest() {
+        return Mockito.mockingDetails(accountInternalApi).isMock();
     }
 }

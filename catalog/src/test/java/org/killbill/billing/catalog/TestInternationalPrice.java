@@ -25,7 +25,7 @@ import org.testng.annotations.Test;
 
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.xmlloader.ValidationErrors;
 
 public class TestInternationalPrice extends CatalogTestSuiteNoDB {
 
@@ -34,7 +34,7 @@ public class TestInternationalPrice extends CatalogTestSuiteNoDB {
         final StandaloneCatalog c = new MockCatalog();
         c.setSupportedCurrencies(new Currency[]{Currency.GBP, Currency.EUR, Currency.USD, Currency.BRL, Currency.MXN});
         final DefaultInternationalPrice p0 = new MockInternationalPrice();
-        p0.setPrices(null);
+        p0.setPrices(new DefaultPrice[0]);
         p0.initialize(c, new URI("foo:bar"));
         final DefaultInternationalPrice p1 = new MockInternationalPrice();
         p1.setPrices(new DefaultPrice[]{
@@ -63,9 +63,10 @@ public class TestInternationalPrice extends CatalogTestSuiteNoDB {
     public void testPriceInitialization() throws URISyntaxException, CatalogApiException {
         final StandaloneCatalog c = new MockCatalog();
         c.setSupportedCurrencies(new Currency[]{Currency.GBP, Currency.EUR, Currency.USD, Currency.BRL, Currency.MXN});
-        c.getCurrentPlans()[0].getFinalPhase().getRecurringPrice().setPrices(null);
+        ((DefaultInternationalPrice) c.getCurrentPlans().iterator().next().getFinalPhase().getRecurring().getRecurringPrice()).setPrices(new DefaultPrice[0]);
+        c.setUnits(new DefaultUnit[0]);
         c.initialize(c, new URI("foo://bar"));
-        Assert.assertEquals(c.getCurrentPlans()[0].getFinalPhase().getRecurringPrice().getPrice(Currency.GBP), new BigDecimal(0));
+        Assert.assertEquals(c.getCurrentPlans().iterator().next().getFinalPhase().getRecurring().getRecurringPrice().getPrice(Currency.GBP), new BigDecimal(0));
     }
 
     @Test(groups = "fast")

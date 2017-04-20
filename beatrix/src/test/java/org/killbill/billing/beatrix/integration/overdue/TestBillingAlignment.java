@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,8 +21,6 @@ package org.killbill.billing.beatrix.integration.overdue;
 import java.math.BigDecimal;
 
 import org.joda.time.LocalDate;
-import org.testng.annotations.Test;
-
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.api.TestApiListener.NextEvent;
 import org.killbill.billing.beatrix.integration.TestIntegrationBase;
@@ -29,52 +29,63 @@ import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.entitlement.api.DefaultEntitlement;
 import org.killbill.billing.invoice.api.InvoiceItemType;
+import org.killbill.billing.subscription.api.user.SubscriptionBaseTransition;
+import org.testng.Assert;
+import org.testng.annotations.Test;
 
 import static org.testng.Assert.assertNotNull;
 
 public class TestBillingAlignment extends TestIntegrationBase {
 
-    // TODO test fails as it should not create a proration when the chnage to annual occurs. Instaed we should restart from the data of the chnage
-    // since we have as a catalog rule:
-    // <billingAlignmentCase>
-    // <billingPeriod>ANNUAL</billingPeriod>
-    // <alignment>SUBSCRIPTION</alignment>
-    // </billingAlignmentCase>
-    //
-    @Test(groups = "slow", enabled = false)
-    public void testTransitonAccountBAToSubscriptionBA() throws Exception {
-
-        final Account account = createAccountWithNonOsgiPaymentMethod(getAccountData(1));
-
+    @Test(groups = "slow")
+    public void testTransitionAccountBAToSubscriptionBA() throws Exception {
         // We take april as it has 30 days (easier to play with BCD)
         // Set clock to the initial start date - we implicitly assume here that the account timezone is UTC
         clock.setDay(new LocalDate(2012, 4, 1));
 
+        // Set the BCD to the 25th
+        final Account account = createAccountWithNonOsgiPaymentMethod(getAccountData(25));
+
         //
         // CREATE SUBSCRIPTION AND EXPECT BOTH EVENTS: NextEvent.CREATE NextEvent.INVOICE
-        // (Start with monthly that has a 'Account' billing alignment
+        // (Start with monthly that has an 'Account' billing alignment)
         //
-        final DefaultEntitlement bpEntitlement = createBaseEntitlementAndCheckForCompletion(account.getId(), "externalKey", "Shotgun", ProductCategory.BASE, BillingPeriod.MONTHLY, NextEvent.CREATE, NextEvent.INVOICE);
+        final DefaultEntitlement bpEntitlement = createBaseEntitlementAndCheckForCompletion(account.getId(), "externalKey", "Shotgun", ProductCategory.BASE, BillingPeriod.MONTHLY, NextEvent.CREATE, NextEvent.BLOCK, NextEvent.INVOICE);
         assertNotNull(bpEntitlement);
+
         invoiceChecker.checkInvoice(account.getId(), 1, callContext, new ExpectedInvoiceItemCheck(new LocalDate(2012, 4, 1), null, InvoiceItemType.FIXED, new BigDecimal("0")));
+        invoiceChecker.checkChargedThroughDate(bpEntitlement.getId(), new LocalDate(2012, 4, 1), callContext);
 
-        // GET OUT TRIAL
-        addDaysAndCheckForCompletion(33, NextEvent.PHASE, NextEvent.INVOICE, NextEvent.PAYMENT);
+        // GET OUT TRIAL (moving clock to 2012-05-04)
+        addDaysAndCheckForCompletion(33, NextEvent.PHASE, NextEvent.INVOICE, NextEvent.PAYMENT, NextEvent.INVOICE_PAYMENT);
 
-        //
-        // Change plan to annual that has been configured to have a 'SubscriptionBase' billing alignment
-        changeEntitlementAndCheckForCompletion(bpEntitlement, "Shotgun", BillingPeriod.ANNUAL, null, NextEvent.CHANGE, NextEvent.INVOICE);
+        invoiceChecker.checkInvoice(account.getId(), 2, callContext, new ExpectedInvoiceItemCheck(new LocalDate(2012, 5, 1), new LocalDate(2012, 5, 25), InvoiceItemType.RECURRING, new BigDecimal("199.96")));
+        invoiceChecker.checkChargedThroughDate(bpEntitlement.getId(), new LocalDate(2012, 5, 25), callContext);
 
+        // Change plan to annual that has been configured to have a 'Subscription' billing alignment
+        final DefaultEntitlement changedBpEntitlement = changeEntitlementAndCheckForCompletion(bpEntitlement, "Shotgun", BillingPeriod.ANNUAL, null, NextEvent.CHANGE, NextEvent.INVOICE, NextEvent.PAYMENT, NextEvent.INVOICE_PAYMENT);
 
-        /*
+        invoiceChecker.checkInvoice(account.getId(),
+                                    3,
+                                    callContext,
+                                    new ExpectedInvoiceItemCheck(new LocalDate(2012, 5, 4), new LocalDate(2013, 5, 1), InvoiceItemType.RECURRING, new BigDecimal("2380.22")),
+                                    new ExpectedInvoiceItemCheck(new LocalDate(2012, 5, 4), new LocalDate(2012, 5, 25), InvoiceItemType.REPAIR_ADJ, new BigDecimal("-174.97")));
+        invoiceChecker.checkChargedThroughDate(bpEntitlement.getId(), new LocalDate(2013, 5, 1), callContext);
 
-        | 64e17f77-fcdd-4c87-8543-1a64d957460c | FIXED      | 2012-04-01 | NULL       |    0.0000 |      NULL | shotgun-monthly |
-        | 07924bfa-cc9b-46dc-ad22-a9a39830a128 | RECURRING  | 2012-05-01 | 2012-06-01 |  249.9500 |  249.9500 | shotgun-monthly |
-        | 92c1e86b-284a-4d33-a920-3cbc6e05f7e6 | RECURRING  | 2012-05-01 | 2012-05-04 |   24.2000 |  249.9500 | shotgun-monthly |
-        | 92c1e86b-284a-4d33-a920-3cbc6e05f7e6 | RECURRING  | 2012-05-04 | 2012-06-01 |  183.6000 | 2399.9500 | shotgun-annual  |
-        | 07924bfa-cc9b-46dc-ad22-a9a39830a128 | REPAIR_ADJ | 2012-05-01 | 2012-06-01 | -249.9500 |      NULL | NULL            |
-        | 07924bfa-cc9b-46dc-ad22-a9a39830a128 | CBA_ADJ    | 2012-05-04 | 2012-05-04 |  249.9500 |      NULL | NULL            |
-        | 92c1e86b-284a-4d33-a920-3cbc6e05f7e6 | CBA_ADJ    | 2012-05-04 | 2012-05-04 | -207.8000 |      NULL | NULL            |
-         */
+        Assert.assertEquals(changedBpEntitlement.getSubscriptionBase().getAllTransitions().size(), 3);
+
+        final SubscriptionBaseTransition trial = changedBpEntitlement.getSubscriptionBase().getAllTransitions().get(0);
+        Assert.assertEquals(trial.getEffectiveTransitionTime().toLocalDate().compareTo(new LocalDate(2012, 4, 1)), 0);
+        Assert.assertEquals(trial.getNextPhase().getName(), "shotgun-monthly-trial");
+
+        final SubscriptionBaseTransition smEvergreen = changedBpEntitlement.getSubscriptionBase().getAllTransitions().get(1);
+        Assert.assertEquals(smEvergreen.getEffectiveTransitionTime().toLocalDate().compareTo(new LocalDate(2012, 5, 1)), 0);
+        Assert.assertEquals(smEvergreen.getNextPhase().getName(), "shotgun-monthly-evergreen");
+
+        final SubscriptionBaseTransition saEvergreen = changedBpEntitlement.getSubscriptionBase().getAllTransitions().get(2);
+        // Verify the IMMEDIATE policy
+        Assert.assertEquals(saEvergreen.getEffectiveTransitionTime().toLocalDate().compareTo(new LocalDate(2012, 5, 4)), 0);
+        // Verify the START_OF_SUBSCRIPTION alignment (both plans have the same 30 days trial)
+        Assert.assertEquals(saEvergreen.getNextPhase().getName(), "shotgun-annual-evergreen");
     }
 }

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,19 +24,22 @@ import java.util.UUID;
 
 import javax.annotation.Nullable;
 
+import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
-
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountData;
+import org.killbill.billing.account.api.MutableAccountData;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.util.audit.AccountAuditLogs;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.common.base.Objects;
+import com.google.common.base.Strings;
+import io.swagger.annotations.ApiModelProperty;
 
 public class AccountJson extends JsonBase {
 
+    @ApiModelProperty(dataType = "java.util.UUID")
     private final String accountId;
     private final String externalKey;
     private final BigDecimal accountCBA;
@@ -44,6 +49,10 @@ public class AccountJson extends JsonBase {
     private final String email;
     private final Integer billCycleDayLocal;
     private final String currency;
+    @ApiModelProperty(dataType = "java.util.UUID")
+    private final String parentAccountId;
+    private final Boolean isPaymentDelegatedToParent;
+    @ApiModelProperty(dataType = "java.util.UUID")
     private final String paymentMethodId;
     private final String timeZone;
     private final String address1;
@@ -55,6 +64,7 @@ public class AccountJson extends JsonBase {
     private final String country;
     private final String locale;
     private final String phone;
+    private final String notes;
     private final Boolean isMigrated;
     private final Boolean isNotifiedForInvoices;
 
@@ -69,8 +79,10 @@ public class AccountJson extends JsonBase {
         this.email = account.getEmail();
         this.billCycleDayLocal = account.getBillCycleDayLocal();
         this.currency = account.getCurrency() != null ? account.getCurrency().toString() : null;
+        this.parentAccountId = account.getParentAccountId() != null ? account.getParentAccountId().toString() : null;
+        this.isPaymentDelegatedToParent = account.isPaymentDelegatedToParent();
         this.paymentMethodId = account.getPaymentMethodId() != null ? account.getPaymentMethodId().toString() : null;
-        this.timeZone = account.getTimeZone().toString();
+        this.timeZone = account.getTimeZone() != null ? account.getTimeZone().toString() : null;
         this.address1 = account.getAddress1();
         this.address2 = account.getAddress2();
         this.postalCode = account.getPostalCode();
@@ -80,6 +92,7 @@ public class AccountJson extends JsonBase {
         this.country = account.getCountry();
         this.locale = account.getLocale();
         this.phone = account.getPhone();
+        this.notes = account.getNotes();
         this.isMigrated = account.isMigrated();
         this.isNotifiedForInvoices = account.isNotifiedForInvoices();
     }
@@ -92,6 +105,8 @@ public class AccountJson extends JsonBase {
                        @JsonProperty("email") final String email,
                        @JsonProperty("billCycleDayLocal") final Integer billCycleDayLocal,
                        @JsonProperty("currency") final String currency,
+                       @JsonProperty("parentAccountId") final String parentAccountId,
+                       @JsonProperty("isPaymentDelegatedToParent") final Boolean isPaymentDelegatedToParent,
                        @JsonProperty("paymentMethodId") final String paymentMethodId,
                        @JsonProperty("timeZone") final String timeZone,
                        @JsonProperty("address1") final String address1,
@@ -103,6 +118,7 @@ public class AccountJson extends JsonBase {
                        @JsonProperty("country") final String country,
                        @JsonProperty("locale") final String locale,
                        @JsonProperty("phone") final String phone,
+                       @JsonProperty("notes") final String notes,
                        @JsonProperty("isMigrated") final Boolean isMigrated,
                        @JsonProperty("isNotifiedForInvoices") final Boolean isNotifiedForInvoices,
                        @JsonProperty("accountBalance") final BigDecimal accountBalance,
@@ -117,6 +133,8 @@ public class AccountJson extends JsonBase {
         this.email = email;
         this.billCycleDayLocal = billCycleDayLocal;
         this.currency = currency;
+        this.parentAccountId = parentAccountId;
+        this.isPaymentDelegatedToParent = isPaymentDelegatedToParent;
         this.paymentMethodId = paymentMethodId;
         this.timeZone = timeZone;
         this.address1 = address1;
@@ -128,16 +146,27 @@ public class AccountJson extends JsonBase {
         this.country = country;
         this.locale = locale;
         this.phone = phone;
+        this.notes = notes;
         this.isMigrated = isMigrated;
         this.isNotifiedForInvoices = isNotifiedForInvoices;
         this.accountCBA = accountCBA;
     }
 
-    public AccountData toAccountData() {
-        return new AccountData() {
+    public Account toAccount(@Nullable final UUID accountId) {
+        return new Account() {
+
+            @Override
+            public UUID getId() {
+                return accountId;
+            }
+
             @Override
             public DateTimeZone getTimeZone() {
-                return (timeZone != null) ? DateTimeZone.forID(timeZone) : null;
+                if (Strings.emptyToNull(timeZone) == null) {
+                    return null;
+                } else {
+                    return DateTimeZone.forID(timeZone);
+                }
             }
 
             @Override
@@ -156,18 +185,27 @@ public class AccountJson extends JsonBase {
             }
 
             @Override
+            public String getNotes() {
+                return notes;
+            }
+
+            @Override
             public Boolean isMigrated() {
-                return Objects.firstNonNull(isMigrated, false);
+                return isMigrated;
             }
 
             @Override
             public Boolean isNotifiedForInvoices() {
-                return Objects.firstNonNull(isNotifiedForInvoices, false);
+                return isNotifiedForInvoices;
             }
 
             @Override
             public UUID getPaymentMethodId() {
-                return paymentMethodId != null ? UUID.fromString(paymentMethodId) : null;
+                if (Strings.emptyToNull(paymentMethodId) == null) {
+                    return null;
+                } else {
+                    return UUID.fromString(paymentMethodId);
+                }
             }
 
             @Override
@@ -182,14 +220,9 @@ public class AccountJson extends JsonBase {
 
             @Override
             public Integer getFirstNameLength() {
-                if (firstNameLength == null && name == null) {
-                    return 0;
-                } else if (firstNameLength == null) {
-                    return name.length();
-                } else {
-                    return firstNameLength;
-                }
+                return firstNameLength;
             }
+
 
             @Override
             public String getExternalKey() {
@@ -203,7 +236,7 @@ public class AccountJson extends JsonBase {
 
             @Override
             public Currency getCurrency() {
-                if (currency == null) {
+                if (Strings.emptyToNull(currency) == null) {
                     return null;
                 } else {
                     return Currency.valueOf(currency);
@@ -238,6 +271,53 @@ public class AccountJson extends JsonBase {
             @Override
             public String getAddress1() {
                 return address1;
+            }
+
+            @Override
+            public UUID getParentAccountId() {
+                if (Strings.emptyToNull(parentAccountId) == null) {
+                    return null;
+                } else {
+                    return UUID.fromString(parentAccountId);
+                }
+            }
+
+            @Override
+            public Boolean isPaymentDelegatedToParent() {
+                return isPaymentDelegatedToParent;
+            }
+
+            //
+            // Non implemented
+            //
+            @Override
+            public DateTimeZone getFixedOffsetTimeZone() {
+                return null;
+            }
+
+            @Override
+            public DateTime getReferenceTime() {
+                return null;
+            }
+
+            @Override
+            public DateTime getCreatedDate() {
+                return null;
+            }
+
+            @Override
+            public DateTime getUpdatedDate() {
+                return null;
+            }
+
+            @Override
+            public MutableAccountData toMutableAccountData() {
+                return null;
+            }
+
+            @Override
+            public Account mergeWithDelegate(final Account delegate) {
+                return null;
             }
         };
     }
@@ -276,6 +356,15 @@ public class AccountJson extends JsonBase {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public String getParentAccountId() {
+        return parentAccountId;
+    }
+
+    @JsonProperty("isPaymentDelegatedToParent")
+    public Boolean isPaymentDelegatedToParent() {
+        return isPaymentDelegatedToParent;
     }
 
     public String getPaymentMethodId() {
@@ -322,6 +411,10 @@ public class AccountJson extends JsonBase {
         return phone;
     }
 
+    public String getNotes() {
+        return notes;
+    }
+
     @JsonProperty("isMigrated")
     public Boolean isMigrated() {
         return isMigrated;
@@ -344,6 +437,8 @@ public class AccountJson extends JsonBase {
                ", email='" + email + '\'' +
                ", billCycleDayLocal=" + billCycleDayLocal +
                ", currency='" + currency + '\'' +
+               ", parentAccountId=" + parentAccountId + '\'' +
+               ", isPaymentDelegatedToParent=" + isPaymentDelegatedToParent + '\'' +
                ", paymentMethodId='" + paymentMethodId + '\'' +
                ", timeZone='" + timeZone + '\'' +
                ", address1='" + address1 + '\'' +
@@ -355,6 +450,7 @@ public class AccountJson extends JsonBase {
                ", country='" + country + '\'' +
                ", locale='" + locale + '\'' +
                ", phone='" + phone + '\'' +
+               ", notes='" + notes + '\'' +
                ", isMigrated=" + isMigrated +
                ", isNotifiedForInvoices=" + isNotifiedForInvoices +
                '}';
@@ -401,6 +497,12 @@ public class AccountJson extends JsonBase {
         if (currency != null ? !currency.equals(that.currency) : that.currency != null) {
             return false;
         }
+        if (parentAccountId != null ? !parentAccountId.equals(that.parentAccountId) : that.parentAccountId != null) {
+            return false;
+        }
+        if (isPaymentDelegatedToParent != null ? !isPaymentDelegatedToParent.equals(that.isPaymentDelegatedToParent) : that.isPaymentDelegatedToParent != null) {
+            return false;
+        }
         if (email != null ? !email.equals(that.email) : that.email != null) {
             return false;
         }
@@ -428,6 +530,9 @@ public class AccountJson extends JsonBase {
         if (phone != null ? !phone.equals(that.phone) : that.phone != null) {
             return false;
         }
+        if (notes != null ? !notes.equals(that.notes) : that.notes != null) {
+            return false;
+        }
         if (postalCode != null ? !postalCode.equals(that.postalCode) : that.postalCode != null) {
             return false;
         }
@@ -452,6 +557,8 @@ public class AccountJson extends JsonBase {
         result = 31 * result + (email != null ? email.hashCode() : 0);
         result = 31 * result + (billCycleDayLocal != null ? billCycleDayLocal.hashCode() : 0);
         result = 31 * result + (currency != null ? currency.hashCode() : 0);
+        result = 31 * result + (parentAccountId != null ? parentAccountId.hashCode() : 0);
+        result = 31 * result + (isPaymentDelegatedToParent != null ? isPaymentDelegatedToParent.hashCode() : 0);
         result = 31 * result + (paymentMethodId != null ? paymentMethodId.hashCode() : 0);
         result = 31 * result + (timeZone != null ? timeZone.hashCode() : 0);
         result = 31 * result + (address1 != null ? address1.hashCode() : 0);
@@ -463,6 +570,7 @@ public class AccountJson extends JsonBase {
         result = 31 * result + (country != null ? country.hashCode() : 0);
         result = 31 * result + (locale != null ? locale.hashCode() : 0);
         result = 31 * result + (phone != null ? phone.hashCode() : 0);
+        result = 31 * result + (notes != null ? notes.hashCode() : 0);
         result = 31 * result + (isMigrated != null ? isMigrated.hashCode() : 0);
         result = 31 * result + (isNotifiedForInvoices != null ? isNotifiedForInvoices.hashCode() : 0);
         return result;

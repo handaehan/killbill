@@ -28,26 +28,27 @@ public class SubscriptionBuilder {
 
     private UUID id;
     private UUID bundleId;
+    private String bundleExternalKey;
     private DateTime createdDate;
     private DateTime updatedDate;
     private DateTime alignStartDate;
     private DateTime bundleStartDate;
-    private Long activeVersion;
     private ProductCategory category;
     private DateTime chargedThroughDate;
+    private boolean migrated;
 
     public SubscriptionBuilder() {
-        this.activeVersion = SubscriptionEvents.INITIAL_VERSION;
     }
 
     public SubscriptionBuilder(final DefaultSubscriptionBase original) {
         this.id = original.getId();
         this.bundleId = original.getBundleId();
+        this.bundleExternalKey = original.getBundleExternalKey();
         this.alignStartDate = original.getAlignStartDate();
         this.bundleStartDate = original.getBundleStartDate();
         this.category = original.getCategory();
-        this.activeVersion = original.getActiveVersion();
         this.chargedThroughDate = original.getChargedThroughDate();
+        this.migrated = original.isMigrated();
     }
 
     public SubscriptionBuilder setId(final UUID id) {
@@ -70,6 +71,11 @@ public class SubscriptionBuilder {
         return this;
     }
 
+    public SubscriptionBuilder setBundleExternalKey(final String bundleExternalKey) {
+        this.bundleExternalKey = bundleExternalKey;
+        return this;
+    }
+
     public SubscriptionBuilder setAlignStartDate(final DateTime alignStartDate) {
         this.alignStartDate = alignStartDate;
         return this;
@@ -79,14 +85,13 @@ public class SubscriptionBuilder {
         this.bundleStartDate = bundleStartDate;
         return this;
     }
-
-    public SubscriptionBuilder setActiveVersion(final long activeVersion) {
-        this.activeVersion = activeVersion;
+    public SubscriptionBuilder setChargedThroughDate(final DateTime chargedThroughDate) {
+        this.chargedThroughDate = chargedThroughDate;
         return this;
     }
 
-    public SubscriptionBuilder setChargedThroughDate(final DateTime chargedThroughDate) {
-        this.chargedThroughDate = chargedThroughDate;
+    public SubscriptionBuilder setMigrated(final boolean migrated) {
+        this.migrated = migrated;
         return this;
     }
 
@@ -111,6 +116,10 @@ public class SubscriptionBuilder {
         return bundleId;
     }
 
+    public String getBundleExternalKey() {
+        return bundleExternalKey;
+    }
+
     public DateTime getAlignStartDate() {
         return alignStartDate;
     }
@@ -118,17 +127,16 @@ public class SubscriptionBuilder {
     public DateTime getBundleStartDate() {
         return bundleStartDate;
     }
-
-    public Long getActiveVersion() {
-        return activeVersion;
-    }
-
     public ProductCategory getCategory() {
         return category;
     }
 
     public DateTime getChargedThroughDate() {
         return chargedThroughDate;
+    }
+
+    public boolean isMigrated() {
+        return migrated;
     }
 
     private void checkAllFieldsSet() {

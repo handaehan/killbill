@@ -24,17 +24,14 @@ import org.killbill.billing.subscription.events.user.ApiEvent;
 
 public abstract class EventBase implements SubscriptionBaseEvent {
 
-    private final long totalOrdering;
     private final UUID uuid;
     private final UUID subscriptionId;
     private final DateTime createdDate;
     private final DateTime updatedDate;
-    private final DateTime requestedDate;
     private final DateTime effectiveDate;
-    private final DateTime processedDate;
 
-    private long activeVersion;
-    private boolean isActive;
+    private final long totalOrdering;
+    private final boolean isActive;
 
     public EventBase(final EventBaseBuilder<?> builder) {
         this.totalOrdering = builder.getTotalOrdering();
@@ -42,26 +39,13 @@ public abstract class EventBase implements SubscriptionBaseEvent {
         this.subscriptionId = builder.getSubscriptionId();
         this.createdDate = builder.getCreatedDate();
         this.updatedDate = builder.getUpdatedDate();
-        this.requestedDate = builder.getRequestedDate();
         this.effectiveDate = builder.getEffectiveDate();
-        this.processedDate = builder.getProcessedDate();
-        this.activeVersion = builder.getActiveVersion();
         this.isActive = builder.isActive();
-    }
-
-    @Override
-    public DateTime getRequestedDate() {
-        return requestedDate;
     }
 
     @Override
     public DateTime getEffectiveDate() {
         return effectiveDate;
-    }
-
-    @Override
-    public DateTime getProcessedDate() {
-        return processedDate;
     }
 
     @Override
@@ -90,35 +74,15 @@ public abstract class EventBase implements SubscriptionBaseEvent {
     }
 
     @Override
-    public long getActiveVersion() {
-        return activeVersion;
-    }
-
-    @Override
-    public void setActiveVersion(final long activeVersion) {
-        this.activeVersion = activeVersion;
-    }
-
-    @Override
     public boolean isActive() {
         return isActive;
-    }
-
-    @Override
-    public void deactivate() {
-        this.isActive = false;
-    }
-
-    @Override
-    public void reactivate() {
-        this.isActive = true;
     }
 
     //
     // Really used for unit tests only as the sql implementation relies on date first and then event insertion
     //
     // Order first by:
-    // - effectiveDate, followed by processedDate, requestedDate
+    // - effectiveDate, followed by processedDate
     // - if all dates are equal-- unlikely, we first return PHASE EVENTS
     // - If both events are User events, return the first CREATE, CHANGE,... as specified by ApiEventType
     // - If all that is not enough return consistent by random ordering based on UUID
@@ -133,18 +97,10 @@ public abstract class EventBase implements SubscriptionBaseEvent {
             return -1;
         } else if (effectiveDate.isAfter(other.getEffectiveDate())) {
             return 1;
-        } else if (processedDate.isBefore(other.getProcessedDate())) {
-            return -1;
-        } else if (processedDate.isAfter(other.getProcessedDate())) {
-            return 1;
-        } else if (requestedDate.isBefore(other.getRequestedDate())) {
-            return -1;
-        } else if (requestedDate.isAfter(other.getRequestedDate())) {
-            return 1;
         } else if (getType() != other.getType()) {
             return (getType() == EventType.PHASE) ? -1 : 1;
         } else if (getType() == EventType.API_USER) {
-            return ((ApiEvent) this).getEventType().compareTo(((ApiEvent) other).getEventType());
+            return ((ApiEvent) this).getApiEventType().compareTo(((ApiEvent) other).getApiEventType());
         } else {
             return uuid.compareTo(other.getId());
         }

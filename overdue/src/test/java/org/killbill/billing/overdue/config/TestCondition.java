@@ -25,14 +25,14 @@ import javax.xml.bind.annotation.XmlRootElement;
 
 import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
+import org.killbill.billing.payment.api.PaymentResponse;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.overdue.OverdueTestSuiteNoDB;
 import org.killbill.billing.overdue.config.api.BillingState;
-import org.killbill.billing.overdue.config.api.PaymentResponse;
-import org.killbill.billing.util.config.catalog.XMLLoader;
+import org.killbill.xmlloader.XMLLoader;
 import org.killbill.billing.util.tag.ControlTagType;
 import org.killbill.billing.util.tag.DefaultControlTag;
 import org.killbill.billing.util.tag.DescriptiveTag;
@@ -41,7 +41,7 @@ import org.killbill.billing.util.tag.Tag;
 public class TestCondition extends OverdueTestSuiteNoDB {
 
     @XmlRootElement(name = "condition")
-    private static class MockCondition extends DefaultCondition {}
+    private static class MockCondition extends DefaultOverdueCondition {}
 
     @Test(groups = "fast")
     public void testNumberOfUnpaidInvoicesEqualsOrExceeds() throws Exception {
@@ -139,7 +139,7 @@ public class TestCondition extends OverdueTestSuiteNoDB {
     public void testHasControlTag() throws Exception {
         final String xml =
                 "<condition>" +
-                "	<controlTag>OVERDUE_ENFORCEMENT_OFF</controlTag>" +
+                "	<controlTagInclusion>OVERDUE_ENFORCEMENT_OFF</controlTagInclusion>" +
                 "</condition>";
         final InputStream is = new ByteArrayInputStream(xml.getBytes());
         final MockCondition c = XMLLoader.getObjectFromStreamNoValidation(is, MockCondition.class);

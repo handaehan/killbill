@@ -19,22 +19,21 @@ package org.killbill.billing.invoice.notification;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.killbill.billing.subscription.api.user.SubscriptionBaseApiException;
-import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.invoice.InvoiceListener;
 import org.killbill.billing.invoice.api.DefaultInvoiceService;
+import org.killbill.billing.subscription.api.SubscriptionBase;
+import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
+import org.killbill.billing.subscription.api.user.SubscriptionBaseApiException;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.config.definition.InvoiceConfig;
 import org.killbill.notificationq.api.NotificationEvent;
 import org.killbill.notificationq.api.NotificationQueue;
 import org.killbill.notificationq.api.NotificationQueueService;
 import org.killbill.notificationq.api.NotificationQueueService.NoSuchNotificationQueue;
 import org.killbill.notificationq.api.NotificationQueueService.NotificationQueueAlreadyExists;
 import org.killbill.notificationq.api.NotificationQueueService.NotificationQueueHandler;
-import org.killbill.billing.util.callcontext.InternalCallContextFactory;
-import org.killbill.billing.util.config.InvoiceConfig;
-import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.inject.Inject;
 
@@ -45,7 +44,6 @@ public class DefaultNextBillingDateNotifier implements NextBillingDateNotifier {
     public static final String NEXT_BILLING_DATE_NOTIFIER_QUEUE = "next-billing-date-queue";
 
     private final NotificationQueueService notificationQueueService;
-    private final InvoiceConfig config;
     private final SubscriptionBaseInternalApi subscriptionApi;
     private final InvoiceListener listener;
     private final InternalCallContextFactory callContextFactory;
@@ -54,12 +52,10 @@ public class DefaultNextBillingDateNotifier implements NextBillingDateNotifier {
 
     @Inject
     public DefaultNextBillingDateNotifier(final NotificationQueueService notificationQueueService,
-                                          final InvoiceConfig config,
                                           final SubscriptionBaseInternalApi subscriptionApi,
                                           final InvoiceListener listener,
                                           final InternalCallContextFactory callContextFactory) {
         this.notificationQueueService = notificationQueueService;
-        this.config = config;
         this.subscriptionApi = subscriptionApi;
         this.listener = listener;
         this.callContextFactory = callContextFactory;
@@ -71,25 +67,29 @@ public class DefaultNextBillingDateNotifier implements NextBillingDateNotifier {
         final NotificationQueueHandler notificationQueueHandler = new NotificationQueueHandler() {
             @Override
             public void handleReadyNotification(final NotificationEvent notificationKey, final DateTime eventDate, final UUID userToken, final Long accountRecordId, final Long tenantRecordId) {
+                if (!(notificationKey instanceof NextBillingDateNotificationKey)) {
+                    log.error("Invoice service received an unexpected event className='{}", notificationKey.getClass());
+                    return;
+                }
+
+                final NextBillingDateNotificationKey key = (NextBillingDateNotificationKey) notificationKey;
+
+                // Just to ensure compatibility with json that might not have that targetDate field (old versions < 0.13.6)
+                final DateTime targetDate = key.getTargetDate() != null ? key.getTargetDate() : eventDate;
                 try {
-                    if (!(notificationKey instanceof NextBillingDateNotificationKey)) {
-                        log.error("Invoice service received an unexpected event type {}", notificationKey.getClass().getName());
+                    final SubscriptionBase subscription = subscriptionApi.getSubscriptionFromId(key.getUuidKey(), callContextFactory.createInternalTenantContext(tenantRecordId, accountRecordId));
+                    if (subscription == null) {
+                        log.warn("Unable to retrieve subscriptionId='{}' for event {}", key.getUuidKey(), key);
                         return;
                     }
-
-                    final NextBillingDateNotificationKey key = (NextBillingDateNotificationKey) notificationKey;
-                    try {
-                        final SubscriptionBase subscription = subscriptionApi.getSubscriptionFromId(key.getUuidKey(), callContextFactory.createInternalTenantContext(tenantRecordId, accountRecordId));
-                        if (subscription == null) {
-                            log.warn("Next Billing Date Notification Queue handled spurious notification (key: " + key + ")");
-                        } else {
-                            processEvent(key.getUuidKey(), eventDate, userToken, accountRecordId, tenantRecordId);
-                        }
-                    } catch (SubscriptionBaseApiException e) {
-                        log.warn("Next Billing Date Notification Queue handled spurious notification (key: " + key + ")", e);
+                    if (key.isDryRunForInvoiceNotification() != null && // Just to ensure compatibility with json that might not have that field (old versions < 0.13.6)
+                        key.isDryRunForInvoiceNotification()) {
+                        processEventForInvoiceNotification(key.getUuidKey(), targetDate, userToken, accountRecordId, tenantRecordId);
+                    } else {
+                        processEventForInvoiceGeneration(key.getUuidKey(), targetDate, userToken, accountRecordId, tenantRecordId);
                     }
-                } catch (IllegalArgumentException e) {
-                    log.error("The key returned from the NextBillingNotificationQueue is not a valid UUID", e);
+                } catch (SubscriptionBaseApiException e) {
+                    log.warn("Error retrieving subscriptionId='{}'", key.getUuidKey(), e);
                 }
             }
         };
@@ -112,7 +112,11 @@ public class DefaultNextBillingDateNotifier implements NextBillingDateNotifier {
         }
     }
 
-    private void processEvent(final UUID subscriptionId, final DateTime eventDateTime, final UUID userToken, final Long accountRecordId, final Long tenantRecordId) {
+    private void processEventForInvoiceGeneration(final UUID subscriptionId, final DateTime eventDateTime, final UUID userToken, final Long accountRecordId, final Long tenantRecordId) {
         listener.handleNextBillingDateEvent(subscriptionId, eventDateTime, userToken, accountRecordId, tenantRecordId);
+    }
+
+    private void processEventForInvoiceNotification(final UUID subscriptionId, final DateTime eventDateTime, final UUID userToken, final Long accountRecordId, final Long tenantRecordId) {
+        listener.handleEventForInvoiceNotification(subscriptionId, eventDateTime, userToken, accountRecordId, tenantRecordId);
     }
 }

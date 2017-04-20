@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2012 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -24,11 +26,8 @@ import java.util.UUID;
 
 import javax.inject.Inject;
 
-import org.skife.jdbi.v2.IDBI;
-
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.callcontext.InternalTenantContext;
-import org.killbill.clock.Clock;
 import org.killbill.billing.util.api.AuditLevel;
 import org.killbill.billing.util.audit.AuditLog;
 import org.killbill.billing.util.audit.ChangeType;
@@ -36,6 +35,7 @@ import org.killbill.billing.util.audit.DefaultAccountAuditLogs;
 import org.killbill.billing.util.audit.DefaultAccountAuditLogsForObjectType;
 import org.killbill.billing.util.audit.DefaultAuditLog;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.billing.util.dao.NonEntitySqlDao;
 import org.killbill.billing.util.dao.RecordIdIdMappings;
@@ -44,6 +44,8 @@ import org.killbill.billing.util.entity.dao.EntitySqlDao;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoTransactionWrapper;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoTransactionalJdbiWrapper;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoWrapperFactory;
+import org.killbill.clock.Clock;
+import org.skife.jdbi.v2.IDBI;
 
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
@@ -56,9 +58,9 @@ public class DefaultAuditDao implements AuditDao {
     private final EntitySqlDaoTransactionalJdbiWrapper transactionalSqlDao;
 
     @Inject
-    public DefaultAuditDao(final IDBI dbi, final Clock clock, final CacheControllerDispatcher cacheControllerDispatcher, final NonEntityDao nonEntityDao) {
+    public DefaultAuditDao(final IDBI dbi, final Clock clock, final CacheControllerDispatcher cacheControllerDispatcher, final NonEntityDao nonEntityDao, final InternalCallContextFactory internalCallContextFactory) {
         this.nonEntitySqlDao = dbi.onDemand(NonEntitySqlDao.class);
-        this.transactionalSqlDao = new EntitySqlDaoTransactionalJdbiWrapper(dbi, clock, cacheControllerDispatcher, nonEntityDao);
+        this.transactionalSqlDao = new EntitySqlDaoTransactionalJdbiWrapper(dbi, clock, cacheControllerDispatcher, nonEntityDao, internalCallContextFactory);
     }
 
     @Override
@@ -68,7 +70,7 @@ public class DefaultAuditDao implements AuditDao {
         // Lazy evaluate records to minimize the memory footprint (these can yield a lot of results)
         // We usually always want to wrap our queries in an EntitySqlDaoTransactionWrapper... except here.
         // Since we want to stream the results out, we don't want to auto-commit when this method returns.
-        final EntitySqlDao auditSqlDao = transactionalSqlDao.onDemand(EntitySqlDao.class);
+        final EntitySqlDao auditSqlDao = transactionalSqlDao.onDemandForStreamingResults(EntitySqlDao.class);
         final Iterator<AuditLogModelDao> auditLogsForAccountRecordId = auditSqlDao.getAuditLogsForAccountRecordId(context);
         final Iterator<AuditLog> allAuditLogs = buildAuditLogsFromModelDao(auditLogsForAccountRecordId, context);
 
@@ -87,7 +89,7 @@ public class DefaultAuditDao implements AuditDao {
         // Lazy evaluate records to minimize the memory footprint (these can yield a lot of results)
         // We usually always want to wrap our queries in an EntitySqlDaoTransactionWrapper... except here.
         // Since we want to stream the results out, we don't want to auto-commit when this method returns.
-        final EntitySqlDao auditSqlDao = transactionalSqlDao.onDemand(EntitySqlDao.class);
+        final EntitySqlDao auditSqlDao = transactionalSqlDao.onDemandForStreamingResults(EntitySqlDao.class);
         final Iterator<AuditLogModelDao> auditLogsForTableNameAndAccountRecordId = auditSqlDao.getAuditLogsForTableNameAndAccountRecordId(actualTableName, context);
         final Iterator<AuditLog> allAuditLogs = buildAuditLogsFromModelDao(auditLogsForTableNameAndAccountRecordId, context);
 
@@ -186,7 +188,7 @@ public class DefaultAuditDao implements AuditDao {
         final Long targetRecordId = nonEntitySqlDao.getRecordIdFromObject(objectId.toString(), tableName.getTableName());
         final List<AuditLog> allAuditLogs = transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<List<AuditLog>>() {
             @Override
-            public List<AuditLog> inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public List<AuditLog> inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
                 final List<AuditLogModelDao> auditLogsViaHistoryForTargetRecordId = entitySqlDaoWrapperFactory.become(EntitySqlDao.class).getAuditLogsViaHistoryForTargetRecordId(historyTableName.name(),
                                                                                                                                                                                   historyTableName.getTableName().toLowerCase(),
                                                                                                                                                                                   targetRecordId,
@@ -200,7 +202,7 @@ public class DefaultAuditDao implements AuditDao {
     private List<AuditLog> getAuditLogsForRecordId(final TableName tableName, final UUID auditedEntityId, final Long targetRecordId, final AuditLevel auditLevel, final InternalTenantContext context) {
         final List<AuditLog> allAuditLogs = transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<List<AuditLog>>() {
             @Override
-            public List<AuditLog> inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public List<AuditLog> inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
                 final List<AuditLogModelDao> auditLogsForTargetRecordId = entitySqlDaoWrapperFactory.become(EntitySqlDao.class).getAuditLogsForTargetRecordId(tableName.name(),
                                                                                                                                                               targetRecordId,
                                                                                                                                                               context);

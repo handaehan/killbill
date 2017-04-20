@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,14 +21,14 @@ package org.killbill.billing.entitlement.api;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
 import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.Product;
+
 
 public class DefaultSubscriptionEvent implements SubscriptionEvent {
 
@@ -50,12 +52,11 @@ public class DefaultSubscriptionEvent implements SubscriptionEvent {
     private final PriceList nextPriceList;
     private final BillingPeriod nextBillingPeriod;
     private final DateTime createdDate;
-    private final DateTimeZone accountTimeZone;
+    private final InternalTenantContext internalTenantContext;
 
     public DefaultSubscriptionEvent(final UUID id,
                                     final UUID entitlementId,
                                     final DateTime effectiveDate,
-                                    final DateTime requestedDate,
                                     final SubscriptionEventType eventType,
                                     final boolean blockingEntitlement,
                                     final boolean blockingBilling,
@@ -72,11 +73,11 @@ public class DefaultSubscriptionEvent implements SubscriptionEvent {
                                     final PriceList nextPriceList,
                                     final BillingPeriod nextBillingPeriod,
                                     final DateTime createDate,
-                                    final DateTimeZone accountTimeZone) {
+                                    final InternalTenantContext internalTenantContext) {
         this.id = id;
         this.entitlementId = entitlementId;
         this.effectiveDate = effectiveDate;
-        this.requestedDate = requestedDate;
+        this.requestedDate = effectiveDate;
         this.eventType = eventType;
         this.isBlockingEntitlement = blockingEntitlement;
         this.isBlockingBilling = blockingBilling;
@@ -93,11 +94,7 @@ public class DefaultSubscriptionEvent implements SubscriptionEvent {
         this.nextPriceList = nextPriceList;
         this.nextBillingPeriod = nextBillingPeriod;
         this.createdDate = createDate;
-        this.accountTimeZone = accountTimeZone;
-    }
-
-    public DateTimeZone getAccountTimeZone() {
-        return accountTimeZone;
+        this.internalTenantContext = internalTenantContext;
     }
 
     public DateTime getEffectiveDateTime() {
@@ -120,12 +117,7 @@ public class DefaultSubscriptionEvent implements SubscriptionEvent {
 
     @Override
     public LocalDate getEffectiveDate() {
-        return effectiveDate != null ? new LocalDate(effectiveDate, accountTimeZone) : null;
-    }
-
-    @Override
-    public LocalDate getRequestedDate() {
-        return requestedDate != null ? new LocalDate(requestedDate, accountTimeZone) : null;
+        return effectiveDate != null ? internalTenantContext.toLocalDate(effectiveDate) : null;
     }
 
     @Override

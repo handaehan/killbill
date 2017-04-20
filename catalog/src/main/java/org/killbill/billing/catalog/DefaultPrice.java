@@ -20,12 +20,13 @@ import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
 import java.math.BigDecimal;
+import java.net.URI;
 
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.catalog.api.CurrencyValueNull;
 import org.killbill.billing.catalog.api.Price;
-import org.killbill.billing.util.config.catalog.ValidatingConfig;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.xmlloader.ValidatingConfig;
+import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
 public class DefaultPrice extends ValidatingConfig<StandaloneCatalog> implements Price {
@@ -64,12 +65,12 @@ public class DefaultPrice extends ValidatingConfig<StandaloneCatalog> implements
         return value;
     }
 
-    protected DefaultPrice setCurrency(final Currency currency) {
+    public DefaultPrice setCurrency(final Currency currency) {
         this.currency = currency;
         return this;
     }
 
-    protected DefaultPrice setValue(final BigDecimal value) {
+    public DefaultPrice setValue(final BigDecimal value) {
         this.value = value;
         return this;
     }
@@ -77,6 +78,40 @@ public class DefaultPrice extends ValidatingConfig<StandaloneCatalog> implements
     @Override
     public ValidationErrors validate(final StandaloneCatalog catalog, final ValidationErrors errors) {
         return errors;
+    }
 
+    @Override
+    public void initialize(final StandaloneCatalog catalog, final URI sourceURI) {
+        super.initialize(catalog, sourceURI);
+        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+    }
+
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof DefaultPrice)) {
+            return false;
+        }
+
+        final DefaultPrice that = (DefaultPrice) o;
+
+        if (currency != that.currency) {
+            return false;
+        }
+        if (value != null ? !value.equals(that.value) : that.value != null) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = currency != null ? currency.hashCode() : 0;
+        result = 31 * result + (value != null ? value.hashCode() : 0);
+        return result;
     }
 }

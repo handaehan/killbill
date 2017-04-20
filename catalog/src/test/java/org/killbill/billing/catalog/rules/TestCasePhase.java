@@ -35,13 +35,13 @@ import org.killbill.billing.catalog.api.ProductCategory;
 
 public class TestCasePhase extends CatalogTestSuiteNoDB {
 
-    protected class CaseResult extends CasePhase<Result> {
+    protected class DefaultCaseResult extends DefaultCasePhase<Result> {
 
         @XmlElement(required = true)
         private final Result policy;
 
-        public CaseResult(final DefaultProduct product, final ProductCategory productCategory, final BillingPeriod billingPeriod, final DefaultPriceList priceList,
-                          final PhaseType phaseType, final Result policy) {
+        public DefaultCaseResult(final DefaultProduct product, final ProductCategory productCategory, final BillingPeriod billingPeriod, final DefaultPriceList priceList,
+                                 final PhaseType phaseType, final Result policy) {
             setProduct(product);
             setProductCategory(productCategory);
             setBillingPeriod(billingPeriod);
@@ -61,10 +61,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testBasic() {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr = new CaseResult(
+        final DefaultCaseResult cr = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -73,8 +73,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 Result.FOO);
 
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, cat.getCurrentProducts()[1].getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, product.getName(), ProductCategory.ADD_ON, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
+        assertionNull(cr, cat.getCurrentProduct(1).getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionException(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, "dipsy", PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.TRIAL, cat);
@@ -84,10 +83,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testWildCardProduct() {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr = new CaseResult(
+        final DefaultCaseResult cr = new DefaultCaseResult(
                 null,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -96,8 +95,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 Result.FOO);
 
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertion(Result.FOO, cr, cat.getCurrentProducts()[1].getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, product.getName(), ProductCategory.ADD_ON, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
+        assertion(Result.FOO, cr, cat.getCurrentProduct(1).getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionException(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, "dipsy", PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.TRIAL, cat);
@@ -107,10 +105,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testWildCardProductCategory() {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr = new CaseResult(
+        final DefaultCaseResult cr = new DefaultCaseResult(
                 product,
                 null,
                 BillingPeriod.MONTHLY,
@@ -119,7 +117,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 Result.FOO);
 
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, cat.getCurrentProducts()[1].getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
+        assertionNull(cr, cat.getCurrentProduct(1).getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertion(Result.FOO, cr, product.getName(), ProductCategory.ADD_ON, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionException(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, "dipsy", PhaseType.EVERGREEN, cat);
@@ -130,10 +128,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testWildCardBillingPeriod() {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr = new CaseResult(
+        final DefaultCaseResult cr = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 null,
@@ -142,8 +140,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 Result.FOO);
 
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, cat.getCurrentProducts()[1].getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, product.getName(), ProductCategory.ADD_ON, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
+        assertionNull(cr, cat.getCurrentProduct(1).getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionException(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, "dipsy", PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.TRIAL, cat);
@@ -153,10 +150,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testWildCardPriceList() {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr = new CaseResult(
+        final DefaultCaseResult cr = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -165,8 +162,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 Result.FOO);
 
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, cat.getCurrentProducts()[1].getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, product.getName(), ProductCategory.ADD_ON, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
+        assertionNull(cr, cat.getCurrentProduct(1).getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, "dipsy", PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.TRIAL, cat);
@@ -176,10 +172,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testWildCardPhaseType() {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr = new CaseResult(
+        final DefaultCaseResult cr = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -188,8 +184,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 Result.FOO);
 
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, cat.getCurrentProducts()[1].getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
-        assertionNull(cr, product.getName(), ProductCategory.ADD_ON, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
+        assertionNull(cr, cat.getCurrentProduct(1).getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionNull(cr, product.getName(), ProductCategory.BASE, BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN, cat);
         assertionException(cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, "dipsy", PhaseType.EVERGREEN, cat);
         assertion(Result.FOO, cr, product.getName(), ProductCategory.BASE, BillingPeriod.MONTHLY, priceList.getName(), PhaseType.TRIAL, cat);
@@ -199,10 +194,10 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
     public void testOrder() throws CatalogApiException {
         final MockCatalog cat = new MockCatalog();
 
-        final DefaultProduct product = cat.getCurrentProducts()[0];
+        final DefaultProduct product = cat.getCurrentProduct(0);
         final DefaultPriceList priceList = cat.getPriceLists().getDefaultPricelist();
 
-        final CaseResult cr0 = new CaseResult(
+        final DefaultCaseResult cr0 = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -210,7 +205,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 PhaseType.EVERGREEN,
                 Result.FOO);
 
-        final CaseResult cr1 = new CaseResult(
+        final DefaultCaseResult cr1 = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -218,7 +213,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 PhaseType.EVERGREEN,
                 Result.BAR);
 
-        final CaseResult cr2 = new CaseResult(
+        final DefaultCaseResult cr2 = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.MONTHLY,
@@ -226,7 +221,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 PhaseType.EVERGREEN,
                 Result.TINKYWINKY);
 
-        final CaseResult cr3 = new CaseResult(
+        final DefaultCaseResult cr3 = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.ANNUAL,
@@ -234,7 +229,7 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 PhaseType.EVERGREEN,
                 Result.DIPSY);
 
-        final CaseResult cr4 = new CaseResult(
+        final DefaultCaseResult cr4 = new DefaultCaseResult(
                 product,
                 ProductCategory.BASE,
                 BillingPeriod.ANNUAL,
@@ -242,38 +237,38 @@ public class TestCasePhase extends CatalogTestSuiteNoDB {
                 PhaseType.EVERGREEN,
                 Result.LALA);
 
-        final Result r1 = CasePhase.getResult(new CaseResult[]{cr0, cr1, cr2, cr3, cr4},
-                                              new PlanPhaseSpecifier(product.getName(), product.getCategory(), BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN), cat);
+        final Result r1 = DefaultCasePhase.getResult(new DefaultCaseResult[]{cr0, cr1, cr2, cr3, cr4},
+                                                     new PlanPhaseSpecifier(product.getName(), BillingPeriod.MONTHLY, priceList.getName(), PhaseType.EVERGREEN), cat);
 
         Assert.assertEquals(Result.FOO, r1);
 
-        final Result r2 = CasePhase.getResult(new CaseResult[]{cr0, cr1, cr2, cr3, cr4},
-                                              new PlanPhaseSpecifier(product.getName(), product.getCategory(), BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN), cat);
+        final Result r2 = DefaultCasePhase.getResult(new DefaultCaseResult[]{cr0, cr1, cr2, cr3, cr4},
+                                                     new PlanPhaseSpecifier(product.getName(), BillingPeriod.ANNUAL, priceList.getName(), PhaseType.EVERGREEN), cat);
 
         Assert.assertEquals(Result.DIPSY, r2);
 
     }
 
-    protected void assertionNull(final CaseResult cr, final String productName, final ProductCategory productCategory, final BillingPeriod bp, final String priceListName, final PhaseType phaseType, final StandaloneCatalog cat) {
+    protected void assertionNull(final DefaultCaseResult cr, final String productName, final ProductCategory productCategory, final BillingPeriod bp, final String priceListName, final PhaseType phaseType, final StandaloneCatalog cat) {
         try {
-            Assert.assertNull(cr.getResult(new PlanPhaseSpecifier(productName, productCategory, bp, priceListName, phaseType), cat));
+            Assert.assertNull(cr.getResult(new PlanPhaseSpecifier(productName, bp, priceListName, phaseType), cat));
         } catch (CatalogApiException e) {
             Assert.fail("", e);
         }
     }
 
-    protected void assertionException(final CaseResult cr, final String productName, final ProductCategory productCategory, final BillingPeriod bp, final String priceListName, final PhaseType phaseType, final StandaloneCatalog cat) {
+    protected void assertionException(final DefaultCaseResult cr, final String productName, final ProductCategory productCategory, final BillingPeriod bp, final String priceListName, final PhaseType phaseType, final StandaloneCatalog cat) {
         try {
-            Assert.assertNull(cr.getResult(new PlanPhaseSpecifier(productName, productCategory, bp, priceListName, phaseType), cat));
+            Assert.assertNull(cr.getResult(new PlanPhaseSpecifier(productName, bp, priceListName, phaseType), cat));
             Assert.fail("Exception expected");
         } catch (CatalogApiException e) {
             Assert.assertEquals(e.getCode(), ErrorCode.CAT_PRICE_LIST_NOT_FOUND.getCode());
         }
     }
 
-    protected void assertion(final Result result, final CaseResult cr, final String productName, final ProductCategory productCategory, final BillingPeriod bp, final String priceListName, final PhaseType phaseType, final StandaloneCatalog cat) {
+    protected void assertion(final Result result, final DefaultCaseResult cr, final String productName, final ProductCategory productCategory, final BillingPeriod bp, final String priceListName, final PhaseType phaseType, final StandaloneCatalog cat) {
         try {
-            Assert.assertEquals(result, cr.getResult(new PlanPhaseSpecifier(productName, productCategory, bp, priceListName, phaseType), cat));
+            Assert.assertEquals(result, cr.getResult(new PlanPhaseSpecifier(productName, bp, priceListName, phaseType), cat));
         } catch (CatalogApiException e) {
             Assert.fail("", e);
         }

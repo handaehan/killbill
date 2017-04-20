@@ -19,35 +19,42 @@ package org.killbill.billing.subscription.events;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
+import org.killbill.billing.util.UUIDs;
 
 @SuppressWarnings("unchecked")
-public class EventBaseBuilder<T extends EventBaseBuilder<T>> {
+public abstract class EventBaseBuilder<T extends EventBaseBuilder<T>> {
 
     private long totalOrdering;
     private UUID uuid;
     private UUID subscriptionId;
     private DateTime createdDate;
     private DateTime updatedDate;
-    private DateTime requestedDate;
     private DateTime effectiveDate;
-    private DateTime processedDate;
 
-    private long activeVersion;
     private boolean isActive;
 
     public EventBaseBuilder() {
-        this.uuid = UUID.randomUUID();
+        this.uuid = UUIDs.randomUUID();
         this.isActive = true;
+    }
+
+
+    public EventBaseBuilder(final SubscriptionBaseEvent event) {
+        this.uuid = event.getId();
+        this.subscriptionId = event.getSubscriptionId();
+        this.effectiveDate = event.getEffectiveDate();
+        this.createdDate = event.getCreatedDate();
+        this.updatedDate = event.getUpdatedDate();
+        this.isActive = event.isActive();
+        this.totalOrdering = event.getTotalOrdering();
     }
 
     public EventBaseBuilder(final EventBaseBuilder<?> copy) {
         this.uuid = copy.uuid;
         this.subscriptionId = copy.subscriptionId;
-        this.requestedDate = copy.requestedDate;
         this.effectiveDate = copy.effectiveDate;
-        this.processedDate = copy.processedDate;
         this.createdDate = copy.getCreatedDate();
-        this.activeVersion = copy.activeVersion;
+        this.updatedDate = copy.getUpdatedDate();
         this.isActive = copy.isActive;
         this.totalOrdering = copy.totalOrdering;
     }
@@ -77,23 +84,8 @@ public class EventBaseBuilder<T extends EventBaseBuilder<T>> {
         return (T) this;
     }
 
-    public T setRequestedDate(final DateTime requestedDate) {
-        this.requestedDate = requestedDate;
-        return (T) this;
-    }
-
     public T setEffectiveDate(final DateTime effectiveDate) {
         this.effectiveDate = effectiveDate;
-        return (T) this;
-    }
-
-    public T setProcessedDate(final DateTime processedDate) {
-        this.processedDate = processedDate;
-        return (T) this;
-    }
-
-    public T setActiveVersion(final long activeVersion) {
-        this.activeVersion = activeVersion;
         return (T) this;
     }
 
@@ -122,23 +114,12 @@ public class EventBaseBuilder<T extends EventBaseBuilder<T>> {
         return subscriptionId;
     }
 
-    public DateTime getRequestedDate() {
-        return requestedDate;
-    }
-
     public DateTime getEffectiveDate() {
         return effectiveDate;
     }
-
-    public DateTime getProcessedDate() {
-        return processedDate;
-    }
-
-    public long getActiveVersion() {
-        return activeVersion;
-    }
-
     public boolean isActive() {
         return isActive;
     }
+
+    public abstract SubscriptionBaseEvent build();
 }

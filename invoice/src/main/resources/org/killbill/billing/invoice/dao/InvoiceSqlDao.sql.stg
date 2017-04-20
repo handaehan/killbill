@@ -7,7 +7,9 @@ tableFields(prefix) ::= <<
 , <prefix>invoice_date
 , <prefix>target_date
 , <prefix>currency
+, <prefix>status
 , <prefix>migrated
+, <prefix>parent_invoice
 , <prefix>created_by
 , <prefix>created_date
 >>
@@ -17,7 +19,9 @@ tableValues() ::= <<
 , :invoiceDate
 , :targetDate
 , :currency
+, :status
 , :migrated
+, :parentInvoice
 , :createdBy
 , :createdDate
 >>
@@ -49,4 +53,29 @@ getInvoiceIdByPaymentId() ::= <<
      AND ip.payment_id = :paymentId
    <AND_CHECK_TENANT("i.")>
    <AND_CHECK_TENANT("ip.")>
+>>
+
+updateStatus() ::= <<
+    UPDATE <tableName()>
+    SET status = :status
+    WHERE id = :id
+    <AND_CHECK_TENANT()>;
+>>
+
+getParentDraftInvoice() ::= <<
+  SELECT <allTableFields()>
+    FROM <tableName()>
+   WHERE account_id = :accountId
+     AND status = 'DRAFT'
+   <AND_CHECK_TENANT()>
+   <defaultOrderBy()>
+>>
+
+getByIds(ids) ::= <<
+select
+  <allTableFields("t.")>
+from <tableName()> t
+where <idField("t.")> in (<ids: {id | :id_<i0>}; separator="," >)
+<AND_CHECK_TENANT("t.")>
+;
 >>

@@ -17,38 +17,58 @@
 package org.killbill.billing.payment.provider;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-
 import org.killbill.billing.catalog.api.Currency;
-import org.killbill.billing.payment.plugin.api.PaymentInfoPlugin;
+import org.killbill.billing.payment.api.PluginProperty;
+import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.plugin.api.PaymentPluginStatus;
+import org.killbill.billing.payment.plugin.api.PaymentTransactionInfoPlugin;
 
-public class DefaultNoOpPaymentInfoPlugin implements PaymentInfoPlugin {
+import com.google.common.collect.ImmutableList;
+
+public class DefaultNoOpPaymentInfoPlugin implements PaymentTransactionInfoPlugin {
 
     private final UUID kbPaymentId;
+    private final UUID kbTransactionPaymentId;
     private final BigDecimal amount;
     private final DateTime effectiveDate;
     private final DateTime createdDate;
     private final PaymentPluginStatus status;
-    private final String error;
+    private final String gatewayError;
+    private final String gatewayErrorCode;
     private final Currency currency;
+    private final TransactionType transactionType;
 
-    public DefaultNoOpPaymentInfoPlugin(final UUID kbPaymentId, final BigDecimal amount, final Currency currency, final DateTime effectiveDate,
-                                        final DateTime createdDate, final PaymentPluginStatus status, final String error) {
+    public DefaultNoOpPaymentInfoPlugin(final UUID kbPaymentId, final UUID kbTransactionPaymentId, final TransactionType transactionType, final BigDecimal amount, final Currency currency, final DateTime effectiveDate,
+                                        final DateTime createdDate, final PaymentPluginStatus status, final String gatewayErrorCode, final String gatewayError) {
         this.kbPaymentId = kbPaymentId;
+        this.kbTransactionPaymentId = kbTransactionPaymentId;
+        this.transactionType = transactionType;
         this.amount = amount;
         this.effectiveDate = effectiveDate;
         this.createdDate = createdDate;
         this.status = status;
-        this.error = error;
+        this.gatewayErrorCode = gatewayErrorCode;
+        this.gatewayError = gatewayError;
         this.currency = currency;
     }
 
     @Override
     public UUID getKbPaymentId() {
         return kbPaymentId;
+    }
+
+    @Override
+    public UUID getKbTransactionPaymentId() {
+        return kbTransactionPaymentId;
+    }
+
+    @Override
+    public TransactionType getTransactionType() {
+        return transactionType;
     }
 
     @Override
@@ -78,12 +98,12 @@ public class DefaultNoOpPaymentInfoPlugin implements PaymentInfoPlugin {
 
     @Override
     public String getGatewayError() {
-        return error;
+        return gatewayError;
     }
 
     @Override
     public String getGatewayErrorCode() {
-        return null;
+        return gatewayErrorCode;
     }
 
     @Override
@@ -97,6 +117,11 @@ public class DefaultNoOpPaymentInfoPlugin implements PaymentInfoPlugin {
     }
 
     @Override
+    public List<PluginProperty> getProperties() {
+        return ImmutableList.<PluginProperty>of();
+    }
+
+    @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("DefaultNoOpPaymentInfoPlugin{");
         sb.append("kbPaymentId=").append(kbPaymentId);
@@ -104,7 +129,7 @@ public class DefaultNoOpPaymentInfoPlugin implements PaymentInfoPlugin {
         sb.append(", effectiveDate=").append(effectiveDate);
         sb.append(", createdDate=").append(createdDate);
         sb.append(", status=").append(status);
-        sb.append(", error='").append(error).append('\'');
+        sb.append(", error='").append(gatewayError).append('\'');
         sb.append(", currency=").append(currency);
         sb.append('}');
         return sb.toString();
@@ -133,10 +158,19 @@ public class DefaultNoOpPaymentInfoPlugin implements PaymentInfoPlugin {
         if (effectiveDate != null ? effectiveDate.compareTo(that.effectiveDate) != 0 : that.effectiveDate != null) {
             return false;
         }
-        if (error != null ? !error.equals(that.error) : that.error != null) {
+        if (gatewayError != null ? !gatewayError.equals(that.gatewayError) : that.gatewayError != null) {
+            return false;
+        }
+        if (gatewayErrorCode != null ? !gatewayErrorCode.equals(that.gatewayErrorCode) : that.gatewayErrorCode != null) {
+            return false;
+        }
+        if (transactionType != null ? !transactionType.equals(that.transactionType) : that.transactionType != null) {
             return false;
         }
         if (kbPaymentId != null ? !kbPaymentId.equals(that.kbPaymentId) : that.kbPaymentId != null) {
+            return false;
+        }
+        if (kbTransactionPaymentId != null ? !kbTransactionPaymentId.equals(that.kbTransactionPaymentId) : that.kbTransactionPaymentId != null) {
             return false;
         }
         if (status != that.status) {
@@ -149,11 +183,14 @@ public class DefaultNoOpPaymentInfoPlugin implements PaymentInfoPlugin {
     @Override
     public int hashCode() {
         int result = kbPaymentId != null ? kbPaymentId.hashCode() : 0;
+        result = 31 * result + (kbTransactionPaymentId != null ? kbTransactionPaymentId.hashCode() : 0);
         result = 31 * result + (amount != null ? amount.hashCode() : 0);
         result = 31 * result + (effectiveDate != null ? effectiveDate.hashCode() : 0);
+        result = 31 * result + (transactionType != null ? transactionType.hashCode() : 0);
         result = 31 * result + (createdDate != null ? createdDate.hashCode() : 0);
         result = 31 * result + (status != null ? status.hashCode() : 0);
-        result = 31 * result + (error != null ? error.hashCode() : 0);
+        result = 31 * result + (gatewayError != null ? gatewayError.hashCode() : 0);
+        result = 31 * result + (gatewayErrorCode != null ? gatewayErrorCode.hashCode() : 0);
         result = 31 * result + (currency != null ? currency.hashCode() : 0);
         return result;
     }

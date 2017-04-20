@@ -1,7 +1,7 @@
 /*
- * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * Groupon licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,67 +16,77 @@
 
 package org.killbill.billing.payment.dao;
 
-import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 
-import org.skife.jdbi.v2.sqlobject.Bind;
-import org.skife.jdbi.v2.sqlobject.BindBean;
-import org.skife.jdbi.v2.sqlobject.SqlQuery;
-import org.skife.jdbi.v2.sqlobject.SqlUpdate;
-
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
-import org.killbill.billing.catalog.api.Currency;
-import org.killbill.commons.jdbi.statement.SmartFetchSize;
 import org.killbill.billing.payment.api.Payment;
 import org.killbill.billing.util.audit.ChangeType;
 import org.killbill.billing.util.entity.dao.Audited;
 import org.killbill.billing.util.entity.dao.EntitySqlDao;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoStringTemplate;
+import org.killbill.commons.jdbi.statement.SmartFetchSize;
+import org.skife.jdbi.v2.sqlobject.Bind;
+import org.skife.jdbi.v2.sqlobject.BindBean;
+import org.skife.jdbi.v2.sqlobject.SqlQuery;
+import org.skife.jdbi.v2.sqlobject.SqlUpdate;
+import org.skife.jdbi.v2.sqlobject.customizers.Define;
 
 @EntitySqlDaoStringTemplate
 public interface PaymentSqlDao extends EntitySqlDao<PaymentModelDao, Payment> {
 
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
-    void updatePaymentStatus(@Bind("id") final String paymentId,
-                             @Bind("processedAmount") final BigDecimal processedAmount,
-                             @Bind("processedCurrency") final Currency processedCurrency,
-                             @Bind("paymentStatus") final String paymentStatus,
-                             @BindBean final InternalCallContext context);
+    void updatePaymentForNewTransaction(@Bind("id") final String paymentId,
+                                        @BindBean final InternalCallContext context);
 
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
-    void updatePaymentForNewAttempt(@Bind("id") final String paymentId,
-                                    @Bind("paymentMethodId") final String paymentMethodId,
-                                    @Bind("amount") final BigDecimal amount,
-                                    @Bind("effectiveDate") final Date effectiveDate,
-                                    @BindBean final InternalCallContext context);
+    Object updatePaymentStateName(@Bind("id") final String paymentId,
+                                  @Bind("stateName") final String stateName,
+                                  @BindBean final InternalCallContext context);
+
+    @SqlUpdate
+    @Audited(ChangeType.UPDATE)
+    Object updateLastSuccessPaymentStateName(@Bind("id") final String paymentId,
+                                             @Bind("stateName") final String stateName,
+                                             @Bind("lastSuccessStateName") final String lastSuccessStateName,
+                                             @BindBean final InternalCallContext context);
 
     @SqlQuery
-    PaymentModelDao getLastPaymentForAccountAndPaymentMethod(@Bind("accountId") final String accountId,
-                                                             @Bind("paymentMethodId") final String paymentMethodId,
-                                                             @BindBean final InternalTenantContext context);
+    public PaymentModelDao getPaymentByExternalKey(@Bind("externalKey") final String externalKey,
+                                                   @BindBean final InternalTenantContext context);
 
     @SqlQuery
-    List<PaymentModelDao> getPaymentsForInvoice(@Bind("invoiceId") final String invoiceId,
-                                                @BindBean final InternalTenantContext context);
+    public List<PaymentModelDao> getPaymentsByStatesAcrossTenants(@StateCollectionBinder final Collection<String> states,
+                                                                  @Bind("createdBeforeDate") final Date createdBeforeDate,
+                                                                  @Bind("createdAfterDate") final Date createdAfterDate,
+                                                                  @Bind("limit") final int limit);
 
     @SqlQuery
-    List<PaymentModelDao> getPaymentsForAccount(@Bind("accountId") final String accountId,
-                                                @BindBean final InternalTenantContext context);
+    @SmartFetchSize(shouldStream = true)
+    public Iterator<PaymentModelDao> searchByState(@PaymentStateCollectionBinder final Collection<String> paymentStates,
+                                                   @Bind("offset") final Long offset,
+                                                   @Bind("rowCount") final Long rowCount,
+                                                   @Define("ordering") final String ordering,
+                                                   @BindBean final InternalTenantContext context);
+
+    @SqlQuery
+    public Long getSearchByStateCount(@PaymentStateCollectionBinder final Collection<String> paymentStates,
+                                      @BindBean final InternalTenantContext context);
 
     @SqlQuery
     @SmartFetchSize(shouldStream = true)
     public Iterator<PaymentModelDao> getByPluginName(@Bind("pluginName") final String pluginName,
                                                      @Bind("offset") final Long offset,
                                                      @Bind("rowCount") final Long rowCount,
+                                                     @Define("ordering") final String ordering,
                                                      @BindBean final InternalTenantContext context);
 
     @SqlQuery
     public Long getCountByPluginName(@Bind("pluginName") final String pluginName,
                                      @BindBean final InternalTenantContext context);
 }
-

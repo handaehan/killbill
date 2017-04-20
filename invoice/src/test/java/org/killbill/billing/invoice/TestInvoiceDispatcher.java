@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,29 +19,28 @@
 package org.killbill.billing.invoice;
 
 import java.math.BigDecimal;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-import org.mockito.Mockito;
-import org.testng.Assert;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
-
+import org.killbill.billing.ErrorCode;
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
+import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.catalog.MockPlan;
 import org.killbill.billing.catalog.MockPlanPhase;
+import org.killbill.billing.catalog.api.BillingMode;
 import org.killbill.billing.catalog.api.BillingPeriod;
+import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.catalog.api.PhaseType;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
-import org.killbill.clock.ClockMock;
+import org.killbill.billing.invoice.InvoiceDispatcher.FutureAccountNotifications;
+import org.killbill.billing.invoice.InvoiceDispatcher.FutureAccountNotifications.SubscriptionNotification;
+import org.killbill.billing.invoice.TestInvoiceHelper.DryRunFutureDateArguments;
+import org.killbill.billing.invoice.api.DryRunArguments;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
 import org.killbill.billing.invoice.api.InvoiceItem;
@@ -48,12 +49,22 @@ import org.killbill.billing.invoice.api.InvoiceNotifier;
 import org.killbill.billing.invoice.dao.InvoiceItemModelDao;
 import org.killbill.billing.invoice.dao.InvoiceModelDao;
 import org.killbill.billing.invoice.notification.NullInvoiceNotifier;
+import org.killbill.billing.junction.BillingEventSet;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
-import org.killbill.billing.callcontext.InternalCallContext;
-import org.killbill.billing.junction.BillingEventSet;
-import org.killbill.billing.junction.BillingModeType;
-import org.killbill.billing.util.timezone.DateAndTimeZoneContext;
+import org.killbill.billing.subscription.api.user.SubscriptionBaseApiException;
+import org.killbill.billing.util.api.TagDefinitionApiException;
+import org.killbill.billing.util.tag.Tag;
+import org.killbill.billing.util.tag.dao.SystemTags;
+import org.mockito.Mockito;
+import org.skife.jdbi.v2.Handle;
+import org.skife.jdbi.v2.tweak.HandleCallback;
+import org.testng.Assert;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 public class TestInvoiceDispatcher extends InvoiceTestSuiteWithEmbeddedDB {
 
@@ -71,47 +82,186 @@ public class TestInvoiceDispatcher extends InvoiceTestSuiteWithEmbeddedDB {
     }
 
     @Test(groups = "slow")
-    public void testDryRunInvoice() throws InvoiceApiException, AccountApiException {
+    public void testDryRunInvoice() throws InvoiceApiException, AccountApiException, CatalogApiException, SubscriptionBaseApiException {
         final UUID accountId = account.getId();
 
         final BillingEventSet events = new MockBillingEventSet();
         final Plan plan = MockPlan.createBicycleNoTrialEvergreen1USD();
         final PlanPhase planPhase = MockPlanPhase.create1USDMonthlyEvergreen();
-        final DateTime effectiveDate = new DateTime().minusDays(1);
+        final DateTime effectiveDate = clock.getUTCNow().minusDays(1);
         final Currency currency = Currency.USD;
         final BigDecimal fixedPrice = null;
         events.add(invoiceUtil.createMockBillingEvent(account, subscription, effectiveDate, plan, planPhase,
                                                       fixedPrice, BigDecimal.ONE, currency, BillingPeriod.MONTHLY, 1,
-                                                      BillingModeType.IN_ADVANCE, "", 1L, SubscriptionBaseTransitionType.CREATE));
+                                                      BillingMode.IN_ADVANCE, "", 1L, SubscriptionBaseTransitionType.CREATE));
 
-        Mockito.when(billingApi.getBillingEventsForAccountAndUpdateAccountBCD(Mockito.<UUID>any(), Mockito.<InternalCallContext>any())).thenReturn(events);
+        Mockito.when(billingApi.getBillingEventsForAccountAndUpdateAccountBCD(Mockito.<UUID>any(), Mockito.<DryRunArguments>any(), Mockito.<InternalCallContext>any())).thenReturn(events);
 
-        final DateTime target = new DateTime();
+        final LocalDate target = internalCallContext.toLocalDate(effectiveDate);
 
         final InvoiceNotifier invoiceNotifier = new NullInvoiceNotifier();
         final InvoiceDispatcher dispatcher = new InvoiceDispatcher(generator, accountApi, billingApi, subscriptionApi, invoiceDao,
-                                                                   nonEntityDao, invoiceNotifier, locker, busService.getBus(),
-                                                                   clock);
+                                                                   internalCallContextFactory, invoiceNotifier, invoicePluginDispatcher, locker, busService.getBus(),
+                                                                   null, invoiceConfig, clock, parkedAccountsManager);
 
-        Invoice invoice = dispatcher.processAccount(accountId, target, true, context);
+        Invoice invoice = dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, new DryRunFutureDateArguments(), context);
         Assert.assertNotNull(invoice);
 
         List<InvoiceModelDao> invoices = invoiceDao.getInvoicesByAccount(context);
         Assert.assertEquals(invoices.size(), 0);
 
         // Try it again to double check
-        invoice = dispatcher.processAccount(accountId, target, true, context);
+        invoice = dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, new DryRunFutureDateArguments(), context);
         Assert.assertNotNull(invoice);
 
         invoices = invoiceDao.getInvoicesByAccount(context);
         Assert.assertEquals(invoices.size(), 0);
 
         // This time no dry run
-        invoice = dispatcher.processAccount(accountId, target, false, context);
+        invoice = dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, null, context);
         Assert.assertNotNull(invoice);
 
         invoices = invoiceDao.getInvoicesByAccount(context);
         Assert.assertEquals(invoices.size(), 1);
+    }
+
+    @Test(groups = "slow")
+    public void testWithParking() throws InvoiceApiException, AccountApiException, CatalogApiException, SubscriptionBaseApiException, TagDefinitionApiException {
+        final UUID accountId = account.getId();
+
+        final BillingEventSet events = new MockBillingEventSet();
+        final Plan plan = MockPlan.createBicycleNoTrialEvergreen1USD();
+        final PlanPhase planPhase = MockPlanPhase.create1USDMonthlyEvergreen();
+        final DateTime effectiveDate = clock.getUTCNow().minusDays(1);
+        final Currency currency = Currency.USD;
+        final BigDecimal fixedPrice = null;
+        events.add(invoiceUtil.createMockBillingEvent(account, subscription, effectiveDate, plan, planPhase,
+                                                      fixedPrice, BigDecimal.ONE, currency, BillingPeriod.MONTHLY, 1,
+                                                      BillingMode.IN_ADVANCE, "", 1L, SubscriptionBaseTransitionType.CREATE));
+
+        Mockito.when(billingApi.getBillingEventsForAccountAndUpdateAccountBCD(Mockito.<UUID>any(), Mockito.<DryRunArguments>any(), Mockito.<InternalCallContext>any())).thenReturn(events);
+
+        final LocalDate target = internalCallContext.toLocalDate(effectiveDate);
+
+        final InvoiceNotifier invoiceNotifier = new NullInvoiceNotifier();
+        final InvoiceDispatcher dispatcher = new InvoiceDispatcher(generator, accountApi, billingApi, subscriptionApi, invoiceDao,
+                                                                   internalCallContextFactory, invoiceNotifier, invoicePluginDispatcher, locker, busService.getBus(),
+                                                                   null, invoiceConfig, clock, parkedAccountsManager);
+
+        // Verify initial tags state for account
+        Assert.assertTrue(tagUserApi.getTagsForAccount(accountId, true, callContext).isEmpty());
+
+        // Create chaos on disk
+        final InvoiceModelDao invoiceModelDao = new InvoiceModelDao(accountId,
+                                                                    target,
+                                                                    target,
+                                                                    currency,
+                                                                    false);
+        final InvoiceItemModelDao invoiceItemModelDao1 = new InvoiceItemModelDao(clock.getUTCNow(),
+                                                                                 InvoiceItemType.RECURRING,
+                                                                                 invoiceModelDao.getId(),
+                                                                                 accountId,
+                                                                                 subscription.getBundleId(),
+                                                                                 subscription.getId(),
+                                                                                 "Bad data",
+                                                                                 plan.getName(),
+                                                                                 planPhase.getName(),
+                                                                                 null,
+                                                                                 effectiveDate.toLocalDate(),
+                                                                                 effectiveDate.plusMonths(1).toLocalDate(),
+                                                                                 BigDecimal.TEN,
+                                                                                 BigDecimal.ONE,
+                                                                                 currency,
+                                                                                 null);
+        final InvoiceItemModelDao invoiceItemModelDao2 = new InvoiceItemModelDao(clock.getUTCNow(),
+                                                                                 InvoiceItemType.RECURRING,
+                                                                                 invoiceModelDao.getId(),
+                                                                                 accountId,
+                                                                                 subscription.getBundleId(),
+                                                                                 subscription.getId(),
+                                                                                 "Bad data",
+                                                                                 plan.getName(),
+                                                                                 planPhase.getName(),
+                                                                                 null,
+                                                                                 effectiveDate.plusDays(1).toLocalDate(),
+                                                                                 effectiveDate.plusMonths(1).toLocalDate(),
+                                                                                 BigDecimal.TEN,
+                                                                                 BigDecimal.ONE,
+                                                                                 currency,
+                                                                                 null);
+
+        invoiceModelDao.addInvoiceItem(invoiceItemModelDao1);
+        invoiceModelDao.addInvoiceItem(invoiceItemModelDao2);
+        invoiceDao.createInvoices(ImmutableList.<InvoiceModelDao>of(invoiceModelDao), context);
+
+        try {
+            dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, new DryRunFutureDateArguments(), context);
+            Assert.fail();
+        } catch (final InvoiceApiException e) {
+            Assert.assertEquals(e.getCode(), ErrorCode.UNEXPECTED_ERROR.getCode());
+            Assert.assertTrue(e.getCause().getMessage().startsWith("Double billing detected"));
+        }
+        // Dry-run: no side effect on disk
+        Assert.assertEquals(invoiceDao.getInvoicesByAccount(context).size(), 1);
+        Assert.assertTrue(tagUserApi.getTagsForAccount(accountId, true, callContext).isEmpty());
+
+        try {
+            dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, null, context);
+            Assert.fail();
+        } catch (final InvoiceApiException e) {
+            Assert.assertEquals(e.getCode(), ErrorCode.UNEXPECTED_ERROR.getCode());
+            Assert.assertTrue(e.getCause().getMessage().startsWith("Double billing detected"));
+        }
+        Assert.assertEquals(invoiceDao.getInvoicesByAccount(context).size(), 1);
+        // No dry-run: account is parked
+        final List<Tag> tags = tagUserApi.getTagsForAccount(accountId, false, callContext);
+        Assert.assertEquals(tags.size(), 1);
+        Assert.assertEquals(tags.get(0).getTagDefinitionId(), SystemTags.PARK_TAG_DEFINITION_ID);
+
+        // isApiCall=false
+        final Invoice nullInvoice1 = dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, null, context);
+        Assert.assertNull(nullInvoice1);
+
+        // No dry-run and isApiCall=true
+        try {
+            dispatcher.processAccount(true, accountId, target, null, context);
+            Assert.fail();
+        } catch (final InvoiceApiException e) {
+            Assert.assertEquals(e.getCode(), ErrorCode.UNEXPECTED_ERROR.getCode());
+            Assert.assertTrue(e.getCause().getMessage().startsWith("Double billing detected"));
+        }
+        // Idempotency
+        Assert.assertEquals(invoiceDao.getInvoicesByAccount(context).size(), 1);
+        Assert.assertEquals(tagUserApi.getTagsForAccount(accountId, false, callContext), tags);
+
+        // Fix state
+        dbi.withHandle(new HandleCallback<Void>() {
+            @Override
+            public Void withHandle(final Handle handle) throws Exception {
+                handle.execute("delete from invoices");
+                handle.execute("delete from invoice_items");
+                return null;
+            }
+        });
+
+        // Dry-run and isApiCall=false: still parked
+        final Invoice nullInvoice2 = dispatcher.processAccountFromNotificationOrBusEvent(accountId, target, new DryRunFutureDateArguments(), context);
+        Assert.assertNull(nullInvoice2);
+
+        // Dry-run and isApiCall=true: call goes through
+        final Invoice invoice1 = dispatcher.processAccount(true, accountId, target, new DryRunFutureDateArguments(), context);
+        Assert.assertNotNull(invoice1);
+        Assert.assertEquals(invoiceDao.getInvoicesByAccount(context).size(), 0);
+        // Dry-run: still parked
+        Assert.assertEquals(tagUserApi.getTagsForAccount(accountId, false, callContext).size(), 1);
+
+        // No dry-run and isApiCall=true: call goes through
+        final Invoice invoice2 = dispatcher.processAccount(true, accountId, target, null, context);
+        Assert.assertNotNull(invoice2);
+        Assert.assertEquals(invoiceDao.getInvoicesByAccount(context).size(), 1);
+        // No dry-run: now unparked
+        Assert.assertEquals(tagUserApi.getTagsForAccount(accountId, false, callContext).size(), 0);
+        Assert.assertEquals(tagUserApi.getTagsForAccount(accountId, true, callContext).size(), 1);
     }
 
     @Test(groups = "slow")
@@ -122,31 +272,31 @@ public class TestInvoiceDispatcher extends InvoiceTestSuiteWithEmbeddedDB {
         final MockPlan bicycleTrialEvergreen1USD = MockPlan.createBicycleTrialEvergreen1USD();
         events.add(invoiceUtil.createMockBillingEvent(account, subscription, new DateTime("2012-05-01T00:03:42.000Z"), bicycleTrialEvergreen1USD,
                                                       new MockPlanPhase(bicycleTrialEvergreen1USD, PhaseType.TRIAL), BigDecimal.ZERO, null, account.getCurrency(), BillingPeriod.NO_BILLING_PERIOD,
-                                                      31, BillingModeType.IN_ADVANCE, "CREATE", 1L, SubscriptionBaseTransitionType.CREATE));
+                                                      31, BillingMode.IN_ADVANCE, "CREATE", 1L, SubscriptionBaseTransitionType.CREATE));
         // Phase change to evergreen
         events.add(invoiceUtil.createMockBillingEvent(account, subscription, new DateTime("2012-05-31T00:03:42.000Z"), bicycleTrialEvergreen1USD,
                                                       new MockPlanPhase(bicycleTrialEvergreen1USD, PhaseType.EVERGREEN), null, new BigDecimal("249.95"), account.getCurrency(), BillingPeriod.MONTHLY,
-                                                      31, BillingModeType.IN_ADVANCE, "PHASE", 2L, SubscriptionBaseTransitionType.PHASE));
+                                                      31, BillingMode.IN_ADVANCE, "PHASE", 2L, SubscriptionBaseTransitionType.PHASE));
         // Overdue period
         events.add(invoiceUtil.createMockBillingEvent(account, subscription, new DateTime("2012-07-15T00:00:00.000Z"), bicycleTrialEvergreen1USD,
                                                       new MockPlanPhase(bicycleTrialEvergreen1USD, PhaseType.EVERGREEN), null, null, account.getCurrency(), BillingPeriod.NO_BILLING_PERIOD,
-                                                      31, BillingModeType.IN_ADVANCE, "", 0L, SubscriptionBaseTransitionType.START_BILLING_DISABLED));
+                                                      31, BillingMode.IN_ADVANCE, "", 0L, SubscriptionBaseTransitionType.START_BILLING_DISABLED));
         events.add(invoiceUtil.createMockBillingEvent(account, subscription, new DateTime("2012-07-25T00:00:00.000Z"), bicycleTrialEvergreen1USD,
                                                       new MockPlanPhase(bicycleTrialEvergreen1USD, PhaseType.EVERGREEN), null, new BigDecimal("249.95"), account.getCurrency(), BillingPeriod.MONTHLY,
-                                                      31, BillingModeType.IN_ADVANCE, "", 1L, SubscriptionBaseTransitionType.END_BILLING_DISABLED));
+                                                      31, BillingMode.IN_ADVANCE, "", 1L, SubscriptionBaseTransitionType.END_BILLING_DISABLED));
         // Upgrade after the overdue period
         final MockPlan jetTrialEvergreen1000USD = MockPlan.createJetTrialEvergreen1000USD();
         events.add(invoiceUtil.createMockBillingEvent(account, subscription, new DateTime("2012-07-25T00:04:00.000Z"), jetTrialEvergreen1000USD,
                                                       new MockPlanPhase(jetTrialEvergreen1000USD, PhaseType.EVERGREEN), null, new BigDecimal("1000"), account.getCurrency(), BillingPeriod.MONTHLY,
-                                                      31, BillingModeType.IN_ADVANCE, "CHANGE", 3L, SubscriptionBaseTransitionType.CHANGE));
+                                                      31, BillingMode.IN_ADVANCE, "CHANGE", 3L, SubscriptionBaseTransitionType.CHANGE));
 
-        Mockito.when(billingApi.getBillingEventsForAccountAndUpdateAccountBCD(Mockito.<UUID>any(), Mockito.<InternalCallContext>any())).thenReturn(events);
+        Mockito.when(billingApi.getBillingEventsForAccountAndUpdateAccountBCD(Mockito.<UUID>any(), Mockito.<DryRunArguments>any(), Mockito.<InternalCallContext>any())).thenReturn(events);
         final InvoiceNotifier invoiceNotifier = new NullInvoiceNotifier();
         final InvoiceDispatcher dispatcher = new InvoiceDispatcher(generator, accountApi, billingApi, subscriptionApi, invoiceDao,
-                                                                   nonEntityDao, invoiceNotifier, locker, busService.getBus(),
-                                                                   clock);
+                                                                   internalCallContextFactory, invoiceNotifier, invoicePluginDispatcher, locker, busService.getBus(),
+                                                                   null, invoiceConfig, clock, parkedAccountsManager);
 
-        final Invoice invoice = dispatcher.processAccount(account.getId(), new DateTime("2012-07-30T00:00:00.000Z"), false, context);
+        final Invoice invoice = dispatcher.processAccountFromNotificationOrBusEvent(account.getId(), new LocalDate("2012-07-30"), null, context);
         Assert.assertNotNull(invoice);
 
         final List<InvoiceItem> invoiceItems = invoice.getInvoiceItems();
@@ -154,7 +304,7 @@ public class TestInvoiceDispatcher extends InvoiceTestSuiteWithEmbeddedDB {
         Assert.assertEquals(invoiceItems.get(0).getInvoiceItemType(), InvoiceItemType.FIXED);
         Assert.assertEquals(invoiceItems.get(0).getStartDate(), new LocalDate("2012-05-01"));
         Assert.assertNull(invoiceItems.get(0).getEndDate());
-        Assert.assertEquals(invoiceItems.get(0).getAmount(), BigDecimal.ZERO);
+        Assert.assertEquals(invoiceItems.get(0).getAmount().compareTo(BigDecimal.ZERO), 0);
         Assert.assertNull(invoiceItems.get(0).getRate());
 
         Assert.assertEquals(invoiceItems.get(1).getInvoiceItemType(), InvoiceItemType.RECURRING);
@@ -184,39 +334,5 @@ public class TestInvoiceDispatcher extends InvoiceTestSuiteWithEmbeddedDB {
             Assert.assertNull(item.getLinkedItemId());
             Assert.assertEquals(item.getSubscriptionId(), subscription.getId());
         }
-    }
-
-    @Test(groups = "slow")
-    public void testCreateNextFutureNotificationDate() throws Exception {
-
-
-        final LocalDate startDate = new LocalDate("2012-10-26");
-        final LocalDate endDate = new LocalDate("2012-11-26");
-
-
-        ((ClockMock) clock).setTime(new DateTime(2012, 10, 13, 1, 12, 23, DateTimeZone.UTC));
-
-        final DateAndTimeZoneContext dateAndTimeZoneContext = new DateAndTimeZoneContext(clock.getUTCNow(), DateTimeZone.forID("Pacific/Pitcairn"), clock);
-
-        final InvoiceItemModelDao item = new InvoiceItemModelDao(UUID.randomUUID(), clock.getUTCNow(), InvoiceItemType.RECURRING, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
-                                                                 "planName", "phaseName", startDate, endDate, new BigDecimal("23.9"), new BigDecimal("23.9"), Currency.EUR, null);
-
-        final InvoiceNotifier invoiceNotifier = new NullInvoiceNotifier();
-        final InvoiceDispatcher dispatcher = new InvoiceDispatcher(generator, accountApi, billingApi, subscriptionApi, invoiceDao,
-                                                                   nonEntityDao, invoiceNotifier, locker, busService.getBus(),
-                                                                   clock);
-
-        final DateTime expectedBefore = clock.getUTCNow();
-        final Map<UUID, DateTime> result = dispatcher.createNextFutureNotificationDate(Collections.singletonList(item), dateAndTimeZoneContext);
-        final DateTime expectedAfter = clock.getUTCNow();
-
-        Assert.assertEquals(result.size(), 1);
-
-        final DateTime receivedDate = result.get(item.getSubscriptionId());
-
-        final LocalDate receivedTargetDate = new LocalDate(receivedDate, DateTimeZone.forID("Pacific/Pitcairn"));
-        Assert.assertEquals(receivedTargetDate, endDate);
-
-        Assert.assertTrue(receivedDate.compareTo(new DateTime(2012, 11, 27, 1, 12, 23, DateTimeZone.UTC)) <= 0);
     }
 }

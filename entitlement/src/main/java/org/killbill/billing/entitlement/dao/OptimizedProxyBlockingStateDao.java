@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -21,12 +23,9 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
-import org.skife.jdbi.v2.IDBI;
-
-import org.killbill.billing.account.api.Account;
+import org.killbill.billing.account.api.ImmutableAccountData;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.ProductCategory;
-import org.killbill.clock.Clock;
 import org.killbill.billing.entitlement.EventsStream;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
@@ -36,16 +35,21 @@ import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.dao.NonEntityDao;
+import org.killbill.bus.api.PersistentBus;
+import org.killbill.clock.Clock;
+import org.killbill.notificationq.api.NotificationQueueService;
+import org.skife.jdbi.v2.IDBI;
 
 import com.google.common.collect.ImmutableList;
 
 public class OptimizedProxyBlockingStateDao extends ProxyBlockingStateDao {
 
     public OptimizedProxyBlockingStateDao(final EventsStreamBuilder eventsStreamBuilder, final SubscriptionBaseInternalApi subscriptionBaseInternalApi,
-                                          final IDBI dbi, final Clock clock, final CacheControllerDispatcher cacheControllerDispatcher,
-                                          final NonEntityDao nonEntityDao) {
-        super(eventsStreamBuilder, subscriptionBaseInternalApi, dbi, clock, cacheControllerDispatcher, nonEntityDao);
+                                          final IDBI dbi, final Clock clock, final NotificationQueueService notificationQueueService, final PersistentBus eventBus,
+                                          final CacheControllerDispatcher cacheControllerDispatcher, final NonEntityDao nonEntityDao, final InternalCallContextFactory internalCallContextFactory) {
+        super(eventsStreamBuilder, subscriptionBaseInternalApi, dbi, clock, notificationQueueService, eventBus, cacheControllerDispatcher, nonEntityDao, internalCallContextFactory);
     }
 
     /**
@@ -57,22 +61,20 @@ public class OptimizedProxyBlockingStateDao extends ProxyBlockingStateDao {
      * <p/>
      * This is a special method for EventsStreamBuilder to save some DAO calls.
      *
-     * @param subscriptionBlockingStatesOnDisk
-     *                                  blocking states on disk for that subscription
-     * @param allBlockingStatesOnDiskForAccount
-     *                                  all blocking states on disk for that account
-     * @param account                   account associated with the subscription
-     * @param bundle                    bundle associated with the subscription
-     * @param baseSubscription          base subscription (ProductCategory.BASE) associated with that bundle
-     * @param subscription              subscription for which to build blocking states
-     * @param allSubscriptionsForBundle all subscriptions associated with that bundle
-     * @param context                   call context
+     * @param subscriptionBlockingStatesOnDisk  blocking states on disk for that subscription
+     * @param allBlockingStatesOnDiskForAccount all blocking states on disk for that account
+     * @param account                           account associated with the subscription
+     * @param bundle                            bundle associated with the subscription
+     * @param baseSubscription                  base subscription (ProductCategory.BASE) associated with that bundle
+     * @param subscription                      subscription for which to build blocking states
+     * @param allSubscriptionsForBundle         all subscriptions associated with that bundle
+     * @param context                           call context
      * @return blocking states for that subscription
      * @throws EntitlementApiException
      */
     public List<BlockingState> getBlockingHistory(final List<BlockingState> subscriptionBlockingStatesOnDisk,
                                                   final List<BlockingState> allBlockingStatesOnDiskForAccount,
-                                                  final Account account,
+                                                  final ImmutableAccountData account,
                                                   final SubscriptionBaseBundle bundle,
                                                   @Nullable final SubscriptionBase baseSubscription,
                                                   final SubscriptionBase subscription,

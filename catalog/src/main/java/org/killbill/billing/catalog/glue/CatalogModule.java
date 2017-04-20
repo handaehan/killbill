@@ -1,5 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
  * Ning licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -16,45 +18,80 @@
 
 package org.killbill.billing.catalog.glue;
 
-import org.skife.config.ConfigSource;
-import org.skife.config.ConfigurationObjectFactory;
-
 import org.killbill.billing.catalog.DefaultCatalogService;
 import org.killbill.billing.catalog.api.CatalogService;
 import org.killbill.billing.catalog.api.CatalogUserApi;
 import org.killbill.billing.catalog.api.user.DefaultCatalogUserApi;
-import org.killbill.billing.catalog.io.ICatalogLoader;
+import org.killbill.billing.catalog.caching.CatalogCache;
+import org.killbill.billing.catalog.caching.CatalogCacheInvalidationCallback;
+import org.killbill.billing.catalog.caching.EhCacheCatalogCache;
+import org.killbill.billing.catalog.caching.EhCacheOverriddenPlanCache;
+import org.killbill.billing.catalog.caching.OverriddenPlanCache;
+import org.killbill.billing.catalog.dao.CatalogOverrideDao;
+import org.killbill.billing.catalog.dao.DefaultCatalogOverrideDao;
+import org.killbill.billing.catalog.io.CatalogLoader;
 import org.killbill.billing.catalog.io.VersionedCatalogLoader;
-import org.killbill.billing.util.config.CatalogConfig;
+import org.killbill.billing.catalog.override.DefaultPriceOverride;
+import org.killbill.billing.catalog.override.PriceOverride;
+import org.killbill.billing.catalog.plugin.VersionedCatalogMapper;
+import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
+import org.killbill.billing.osgi.api.OSGIServiceRegistration;
+import org.killbill.billing.platform.api.KillbillConfigSource;
+import org.killbill.billing.tenant.api.TenantInternalApi.CacheInvalidationCallback;
+import org.killbill.billing.util.config.definition.CatalogConfig;
+import org.killbill.billing.util.glue.KillBillModule;
+import org.skife.config.ConfigurationObjectFactory;
 
-import com.google.inject.AbstractModule;
+import com.google.inject.TypeLiteral;
+import com.google.inject.name.Names;
 
-public class CatalogModule extends AbstractModule {
+public class CatalogModule extends KillBillModule {
 
-    protected final ConfigSource configSource;
+    public static final String CATALOG_INVALIDATION_CALLBACK = "CatalogInvalidationCallback";
 
-    public CatalogModule(final ConfigSource configSource) {
-        this.configSource = configSource;
+    public CatalogModule(final KillbillConfigSource configSource) {
+        super(configSource);
     }
 
     protected void installConfig() {
-        final CatalogConfig config = new ConfigurationObjectFactory(configSource).build(CatalogConfig.class);
+        final CatalogConfig config = new ConfigurationObjectFactory(skifeConfigSource).build(CatalogConfig.class);
         bind(CatalogConfig.class).toInstance(config);
     }
 
     protected void installCatalog() {
         bind(CatalogService.class).to(DefaultCatalogService.class).asEagerSingleton();
-        bind(ICatalogLoader.class).to(VersionedCatalogLoader.class).asEagerSingleton();
+        bind(CatalogLoader.class).to(VersionedCatalogLoader.class).asEagerSingleton();
+        bind(PriceOverride.class).to(DefaultPriceOverride.class).asEagerSingleton();
+    }
+
+    protected void installCatalogDao() {
+        bind(CatalogOverrideDao.class).to(DefaultCatalogOverrideDao.class).asEagerSingleton();
     }
 
     protected void installCatalogUserApi() {
         bind(CatalogUserApi.class).to(DefaultCatalogUserApi.class).asEagerSingleton();
     }
 
+    public void installCatalogConfigCache() {
+        bind(CatalogCache.class).to(EhCacheCatalogCache.class).asEagerSingleton();
+        bind(CacheInvalidationCallback.class).annotatedWith(Names.named(CATALOG_INVALIDATION_CALLBACK)).to(CatalogCacheInvalidationCallback.class).asEagerSingleton();
+
+        bind(OverriddenPlanCache.class).to(EhCacheOverriddenPlanCache.class).asEagerSingleton();
+    }
+
+    protected void installCatalogPluginApi() {
+        bind(new TypeLiteral<OSGIServiceRegistration<CatalogPluginApi>>() {}).toProvider(DefaultCatalogProviderPluginRegistryProvider.class).asEagerSingleton();
+        bind(VersionedCatalogMapper.class).asEagerSingleton();
+    }
+
+
     @Override
     protected void configure() {
         installConfig();
+        installCatalogDao();
         installCatalog();
         installCatalogUserApi();
+        installCatalogConfigCache();
+        installCatalogPluginApi();
     }
 }

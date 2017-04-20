@@ -17,14 +17,15 @@
 package org.killbill.billing.invoice.tree;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import javax.annotation.Nullable;
 
 import org.joda.time.LocalDate;
-
 import org.killbill.billing.invoice.api.InvoiceItem;
 import org.killbill.billing.invoice.tree.Item.ItemAction;
 
@@ -37,20 +38,22 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
 
 /**
- * Tree of invoice items for a given subscription.
+ * Tree of invoice items for a given subscription
  */
 public class SubscriptionItemTree {
 
-    private boolean isBuilt;
+    private final List<Item> items = new LinkedList<Item>();
+    private final List<Item> existingFullyAdjustedItems = new LinkedList<Item>();
+    private final List<InvoiceItem> existingFixedItems = new LinkedList<InvoiceItem>();
+    private final Map<LocalDate, InvoiceItem> remainingFixedItems = new HashMap<LocalDate, InvoiceItem>();
+    private final List<InvoiceItem> pendingItemAdj = new LinkedList<InvoiceItem>();
 
+    private final UUID targetInvoiceId;
     private final UUID subscriptionId;
-    private ItemsNodeInterval root;
 
-    private List<Item> items;
-
-    private List<InvoiceItem> existingFixedItems;
-    private List<InvoiceItem> remainingFixedItems;
-    private List<InvoiceItem> pendingItemAdj;
+    private ItemsNodeInterval root =new ItemsNodeInterval();
+    private boolean isBuilt = false;
+    private boolean isMerged = false;
 
     private static final Comparator<InvoiceItem> INVOICE_ITEM_COMPARATOR = new Comparator<InvoiceItem>() {
         @Override
@@ -64,76 +67,35 @@ public class SubscriptionItemTree {
             if (itemTypeComp != 0) {
                 return itemTypeComp;
             }
-            Preconditions.checkState(false, "Unexpected list of items for subscription " + o1.getSubscriptionId());
+            Preconditions.checkState(false, "Unexpected list of items for subscription " + o1.getSubscriptionId() +
+                                            ", type(item1) = " + o1.getInvoiceItemType() + ", start(item1) = " + o1.getStartDate() +
+                                            ", type(item12) = " + o2.getInvoiceItemType() + ", start(item2) = " + o2.getStartDate());
             // Never reached...
             return 0;
         }
     };
 
-    public SubscriptionItemTree(final UUID subscriptionId) {
+    // targetInvoiceId is the new invoice id being generated
+    public SubscriptionItemTree(final UUID subscriptionId, final UUID targetInvoiceId) {
         this.subscriptionId = subscriptionId;
-        this.root = new ItemsNodeInterval();
-        this.items = new LinkedList<Item>();
-        this.existingFixedItems = new LinkedList<InvoiceItem>();
-        this.remainingFixedItems = new LinkedList<InvoiceItem>();
-        this.pendingItemAdj = new LinkedList<InvoiceItem>();
-        this.isBuilt = false;
+        this.targetInvoiceId = targetInvoiceId;
     }
 
     /**
-     * Build the tree to return the list of existing items.
-     */
-    public void build() {
-        Preconditions.checkState(!isBuilt);
-        for (InvoiceItem item : pendingItemAdj) {
-            root.addAdjustment(item.getStartDate(), item.getAmount(), item.getLinkedItemId());
-        }
-        pendingItemAdj.clear();
-        root.buildForExistingItems(items);
-        isBuilt = true;
-    }
-
-    /**
-     * Flattens the tree so its depth only has one level below root -- becomes a list.
-     * <p>
-     * If the tree was not built, it is first built. The list of items is cleared and the state is now reset to unbuilt.
-     *
-     * @param reverse whether to reverse the existing items (recurring items now show up as CANCEL instead of ADD)
-     */
-    public void flatten(boolean reverse) {
-        if (!isBuilt) {
-            build();
-        }
-        root = new ItemsNodeInterval();
-        for (Item item : items) {
-            Preconditions.checkState(item.getAction() == ItemAction.ADD);
-            root.addExistingItem(new ItemsNodeInterval(root, new Item(item, reverse ? ItemAction.CANCEL : ItemAction.ADD)));
-        }
-        items.clear();
-        isBuilt = false;
-    }
-
-    public void buildForMerge() {
-        Preconditions.checkState(!isBuilt);
-        root.mergeExistingAndProposed(items);
-        isBuilt = true;
-    }
-
-    /**
-     * Add an existing item in the tree.
+     * Add an existing item in the tree. A new node is inserted or an existing one updated, if one for the same period already exists.
      *
      * @param invoiceItem new existing invoice item on disk.
      */
     public void addItem(final InvoiceItem invoiceItem) {
+        Preconditions.checkState(!isBuilt, "Tree already built, unable to add new invoiceItem=%s", invoiceItem);
 
-        Preconditions.checkState(!isBuilt);
         switch (invoiceItem.getInvoiceItemType()) {
             case RECURRING:
-                root.addExistingItem(new ItemsNodeInterval(root, new Item(invoiceItem, ItemAction.ADD)));
+                root.addExistingItem(new ItemsNodeInterval(root, new Item(invoiceItem, targetInvoiceId, ItemAction.ADD)));
                 break;
 
             case REPAIR_ADJ:
-                root.addExistingItem(new ItemsNodeInterval(root, new Item(invoiceItem, ItemAction.CANCEL)));
+                root.addExistingItem(new ItemsNodeInterval(root, new Item(invoiceItem, targetInvoiceId, ItemAction.CANCEL)));
                 break;
 
             case FIXED:
@@ -150,18 +112,58 @@ public class SubscriptionItemTree {
     }
 
     /**
-     * Merge a new proposed ietm in the tree.
+     * Build the tree and process adjustments
+     */
+    public void build() {
+        Preconditions.checkState(!isBuilt);
+
+        for (final InvoiceItem item : pendingItemAdj) {
+            final Item fullyAdjustedItem = root.addAdjustment(item, targetInvoiceId);
+            if (fullyAdjustedItem != null) {
+                existingFullyAdjustedItems.add(fullyAdjustedItem);
+            }
+        }
+        pendingItemAdj.clear();
+
+        root.buildForExistingItems(items, targetInvoiceId);
+        isBuilt = true;
+    }
+
+    /**
+     * Flattens the tree so its depth only has one level below root -- becomes a list.
+     * <p>
+     * If the tree was not built, it is first built. The list of items is cleared and the state is now reset to unbuilt.
+     *
+     * @param reverse whether to reverse the existing items (recurring items now show up as CANCEL instead of ADD)
+     */
+    public void flatten(final boolean reverse) {
+        if (!isBuilt) {
+            build();
+        }
+
+        root = new ItemsNodeInterval();
+        for (final Item item : items) {
+            Preconditions.checkState(item.getAction() == ItemAction.ADD);
+            root.addExistingItem(new ItemsNodeInterval(root, new Item(item, reverse ? ItemAction.CANCEL : ItemAction.ADD)));
+        }
+        items.clear();
+        isBuilt = false;
+    }
+
+    /**
+     * Merge a new proposed item in the tree.
      *
      * @param invoiceItem new proposed item that should be merged in the existing tree
      */
     public void mergeProposedItem(final InvoiceItem invoiceItem) {
+        Preconditions.checkState(!isBuilt, "Tree already built, unable to add new invoiceItem=%s", invoiceItem);
 
-        Preconditions.checkState(!isBuilt);
         switch (invoiceItem.getInvoiceItemType()) {
             case RECURRING:
-                final boolean result = root.addProposedItem(new ItemsNodeInterval(root, new Item(invoiceItem, ItemAction.ADD)));
-                if (!result) {
-                    items.add(new Item(invoiceItem, ItemAction.ADD));
+                // merged means we've either matched the proposed to an existing, or triggered a repair
+                final boolean merged = root.addProposedItem(new ItemsNodeInterval(root, new Item(invoiceItem, targetInvoiceId, ItemAction.ADD)));
+                if (!merged) {
+                    items.add(new Item(invoiceItem, targetInvoiceId, ItemAction.ADD));
                 }
                 break;
 
@@ -173,14 +175,21 @@ public class SubscriptionItemTree {
                     }
                 }).orNull();
                 if (existingItem == null) {
-                    remainingFixedItems.add(invoiceItem);
+                    remainingFixedItems.put(invoiceItem.getStartDate(), invoiceItem);
                 }
                 break;
 
             default:
                 Preconditions.checkState(false, "Unexpected proposed item " + invoiceItem);
         }
+    }
 
+    // Build tree post merge
+    public void buildForMerge() {
+        Preconditions.checkState(!isBuilt, "Tree already built");
+        root.mergeExistingAndProposed(items, targetInvoiceId);
+        isBuilt = true;
+        isMerged = true;
     }
 
     /**
@@ -189,16 +198,33 @@ public class SubscriptionItemTree {
      * <li>When called prior, the merge this gives a flat view of the existing items on disk
      * <li>When called after the merge with proposed items, this gives the list of items that should now be written to disk -- new fixed, recurring and repair.
      * </ul>
+     *
      * @return a flat view of the items in the tree.
      */
     public List<InvoiceItem> getView() {
 
         final List<InvoiceItem> tmp = new LinkedList<InvoiceItem>();
-        tmp.addAll(remainingFixedItems);
+        tmp.addAll(remainingFixedItems.values());
         tmp.addAll(Collections2.filter(Collections2.transform(items, new Function<Item, InvoiceItem>() {
             @Override
             public InvoiceItem apply(final Item input) {
-                return input.toInvoiceItem();
+                final InvoiceItem resultingCandidate = input.toInvoiceItem();
+
+                // Post merge, the ADD items are the candidates for the resulting RECURRING items (see toInvoiceItem()).
+                // We will ignore any resulting item matching existing items on disk though as these are the result of full item adjustments.
+                // See https://github.com/killbill/killbill/issues/654
+                if (isMerged) {
+                    for (final Item existingAdjustedItem : existingFullyAdjustedItems) {
+                        // Note: we DO keep the item in case of partial matches, e.g. if the new proposed item end date is before
+                        // the existing (adjusted) item. See TestSubscriptionItemTree#testMaxedOutProRation
+                        final InvoiceItem fullyAdjustedInvoiceItem = existingAdjustedItem.toInvoiceItem();
+                        if (resultingCandidate.matches(fullyAdjustedInvoiceItem)) {
+                            return null;
+                        }
+                    }
+                }
+
+                return resultingCandidate;
             }
         }), new Predicate<InvoiceItem>() {
             @Override
@@ -242,8 +268,21 @@ public class SubscriptionItemTree {
         }
     }
 
-    public UUID getSubscriptionId() {
-        return subscriptionId;
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("SubscriptionItemTree{");
+        sb.append("targetInvoiceId=").append(targetInvoiceId);
+        sb.append(", subscriptionId=").append(subscriptionId);
+        sb.append(", root=").append(root);
+        sb.append(", isBuilt=").append(isBuilt);
+        sb.append(", isMerged=").append(isMerged);
+        sb.append(", items=").append(items);
+        sb.append(", existingFullyAdjustedItems=").append(existingFullyAdjustedItems);
+        sb.append(", existingFixedItems=").append(existingFixedItems);
+        sb.append(", remainingFixedItems=").append(remainingFixedItems);
+        sb.append(", pendingItemAdj=").append(pendingItemAdj);
+        sb.append('}');
+        return sb.toString();
     }
 
     @Override

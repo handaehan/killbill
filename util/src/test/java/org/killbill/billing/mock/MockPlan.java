@@ -21,12 +21,12 @@ import java.util.Iterator;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.PhaseType;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
+import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.Product;
 
 public class MockPlan implements Plan {
@@ -53,12 +53,17 @@ public class MockPlan implements Plan {
     }
 
     @Override
+    public String getPriceListName() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public String getName() {
         return name;
     }
 
     @Override
-    public Date getEffectiveDateForExistingSubscriptons() {
+    public Date getEffectiveDateForExistingSubscriptions() {
         return new Date();
     }
 
@@ -73,7 +78,7 @@ public class MockPlan implements Plan {
     }
 
     @Override
-    public BillingPeriod getBillingPeriod() {
+    public BillingPeriod getRecurringBillingPeriod() {
         throw new UnsupportedOperationException();
     }
 
@@ -90,11 +95,6 @@ public class MockPlan implements Plan {
     @Override
     public PlanPhase findPhase(final String name) throws CatalogApiException {
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean isRetired() {
-        return false;
     }
 
     @Override

@@ -49,6 +49,7 @@ public class NodeInterval {
      * Build the tree by calling the callback on the last node in the tree or remaining part with no children.
      *
      * @param callback the callback which perform the build logic.
+     * @return whether or not the parent NodeInterval should ignore the period covered by the child (NodeInterval)
      */
     public void build(final BuildNodeCallback callback) {
 
@@ -66,14 +67,16 @@ public class NodeInterval {
                 callback.onMissingInterval(this, curDate, curChild.getStart());
             }
             curChild.build(callback);
+            // Note that skip to child endDate, meaning that we always consider the child [start end]
             curDate = curChild.getEnd();
             curChild = curChild.getRightSibling();
         }
 
-        // Finally if there is a hole at the end, we build the missing piece from ourself
+        // Finally if there is a hole at the end, we build the missing piece from ourselves
         if (curDate.compareTo(end) < 0) {
             callback.onMissingInterval(this, curDate, end);
         }
+        return;
     }
 
     /**
@@ -82,7 +85,7 @@ public class NodeInterval {
      * @param newNode  the node to be added
      * @param callback the callback that will allow to specify insertion and return behavior.
      * @return true if node was inserted. Note that this is driven by the callback, this method is generic
-     *         and specific behavior can be tuned through specific callbacks.
+     * and specific behavior can be tuned through specific callbacks.
      */
     public boolean addNode(final NodeInterval newNode, final AddNodeCallback callback) {
 
@@ -113,15 +116,15 @@ public class NodeInterval {
             }
 
             if (curChild.isItemOverlap(newNode)) {
-                if (callback.shouldInsertNode(this)) {
-                    rebalance(newNode);
-                    return true;
-                } else {
-                    return false;
+                if (rebalance(newNode)) {
+                    return callback.shouldInsertNode(this);
                 }
             }
 
             if (newNode.getStart().compareTo(curChild.getStart()) < 0) {
+
+                Preconditions.checkState(newNode.getEnd().compareTo(end) <= 0);
+
                 if (callback.shouldInsertNode(this)) {
                     newNode.rightSibling = curChild;
                     if (prevChild == null) {
@@ -144,6 +147,62 @@ public class NodeInterval {
         } else {
             return false;
         }
+    }
+
+    public void removeChild(final NodeInterval toBeRemoved) {
+        NodeInterval prevChild = null;
+        NodeInterval curChild = leftChild;
+        while (curChild != null) {
+            if (curChild.isSame(toBeRemoved)) {
+                if (prevChild == null) {
+                    if (curChild.getLeftChild() == null) {
+                        leftChild = curChild.getRightSibling();
+                    } else {
+                        leftChild = curChild.getLeftChild();
+                        adjustRightMostChildSibling(curChild);
+                    }
+                } else {
+                    if (curChild.getLeftChild() == null) {
+                        prevChild.rightSibling = curChild.getRightSibling();
+                    } else {
+                        prevChild.rightSibling = curChild.getLeftChild();
+                        adjustRightMostChildSibling(curChild);
+                    }
+                }
+                break;
+            }
+            prevChild = curChild;
+            curChild = curChild.getRightSibling();
+        }
+    }
+
+    private void adjustRightMostChildSibling(final NodeInterval curNode) {
+        NodeInterval tmpChild = curNode.getLeftChild();
+        NodeInterval preTmpChild = null;
+        while (tmpChild != null) {
+            preTmpChild = tmpChild;
+            tmpChild = tmpChild.getRightSibling();
+        }
+        preTmpChild.rightSibling = curNode.getRightSibling();
+    }
+
+    @JsonIgnore
+    public boolean isPartitionedByChildren() {
+
+        if (leftChild == null) {
+            return false;
+        }
+
+        LocalDate curDate = start;
+        NodeInterval curChild = leftChild;
+        while (curChild != null) {
+            if (curChild.getStart().compareTo(curDate) > 0) {
+                return false;
+            }
+            curDate = curChild.getEnd();
+            curChild = curChild.getRightSibling();
+        }
+        return (curDate.compareTo(end) == 0);
     }
 
     /**
@@ -224,7 +283,6 @@ public class NodeInterval {
         }
     }
 
-
     public boolean isItemContained(final NodeInterval newNode) {
         return (newNode.getStart().compareTo(start) >= 0 &&
                 newNode.getStart().compareTo(end) <= 0 &&
@@ -237,6 +295,13 @@ public class NodeInterval {
                  newNode.getEnd().compareTo(end) >= 0) ||
                 (newNode.getStart().compareTo(start) <= 0 &&
                  newNode.getEnd().compareTo(end) > 0));
+    }
+
+    @JsonIgnore
+    public boolean isSame(final NodeInterval otherNode) {
+        return ((otherNode.getStart().compareTo(start) == 0 &&
+                 otherNode.getEnd().compareTo(end) == 0) &&
+                otherNode.getParent().equals(parent));
     }
 
     @JsonIgnore
@@ -278,13 +343,52 @@ public class NodeInterval {
         return result;
     }
 
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("NodeInterval{");
+        sb.append("this=[")
+          .append(start)
+          .append(",")
+          .append(end)
+          .append("]");
+        if (parent == null) {
+            sb.append(", parent=").append(parent);
+        } else {
+            sb.append(", parent=[")
+              .append(parent.getStart())
+              .append(",")
+              .append(parent.getEnd())
+              .append("]");
+        }
+        if (leftChild == null) {
+            sb.append(", leftChild=").append(leftChild);
+        } else {
+            sb.append(", leftChild=[")
+              .append(leftChild.getStart())
+              .append(",")
+              .append(leftChild.getEnd())
+              .append("]");
+        }
+        if (rightSibling == null) {
+            sb.append(", rightSibling=").append(rightSibling);
+        } else {
+            sb.append(", rightSibling=[")
+              .append(rightSibling.getStart())
+              .append(",")
+              .append(rightSibling.getEnd())
+              .append("]");
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
     /**
      * Since items may be added out of order, there is no guarantee that we don't suddenly have a new node
      * whose interval emcompasses cuurent node(s). In which case we need to rebalance the tree.
      *
      * @param newNode node that triggered a rebalance operation
      */
-    private void rebalance(final NodeInterval newNode) {
+    private boolean rebalance(final NodeInterval newNode) {
 
         NodeInterval prevRebalanced = null;
         NodeInterval curChild = leftChild;
@@ -300,6 +404,10 @@ public class NodeInterval {
             }
             curChild = curChild.rightSibling;
         } while (curChild != null);
+
+        if (toBeRebalanced.isEmpty()) {
+            return false;
+        }
 
         newNode.parent = this;
         final NodeInterval lastNodeToRebalance = toBeRebalanced.get(toBeRebalanced.size() - 1);
@@ -321,6 +429,7 @@ public class NodeInterval {
             }
             prev = cur;
         }
+        return true;
     }
 
     private void computeRootInterval(final NodeInterval newNode) {
@@ -335,6 +444,7 @@ public class NodeInterval {
      * Provides callback for walking the tree.
      */
     public interface WalkCallback {
+
         public void onCurrentNode(final int depth, final NodeInterval curNode, final NodeInterval parent);
     }
 
@@ -342,6 +452,7 @@ public class NodeInterval {
      * Provides custom logic for the search.
      */
     public interface SearchCallback {
+
         /**
          * Custom logic to decide which node to return.
          *

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,21 +18,14 @@
 
 package org.killbill.billing.subscription.glue;
 
-import org.skife.config.ConfigSource;
-import org.skife.config.ConfigurationObjectFactory;
-
 import org.killbill.billing.glue.SubscriptionModule;
-import org.killbill.billing.subscription.alignment.MigrationPlanAligner;
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.subscription.alignment.PlanAligner;
 import org.killbill.billing.subscription.api.SubscriptionBaseApiService;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.SubscriptionBaseService;
-import org.killbill.billing.subscription.api.migration.DefaultSubscriptionBaseMigrationApi;
-import org.killbill.billing.subscription.api.migration.SubscriptionBaseMigrationApi;
 import org.killbill.billing.subscription.api.svcs.DefaultSubscriptionInternalApi;
 import org.killbill.billing.subscription.api.timeline.DefaultSubscriptionBaseTimelineApi;
-import org.killbill.billing.subscription.api.timeline.RepairSubscriptionApiService;
-import org.killbill.billing.subscription.api.timeline.RepairSubscriptionLifecycleDao;
 import org.killbill.billing.subscription.api.timeline.SubscriptionBaseTimelineApi;
 import org.killbill.billing.subscription.api.transfer.DefaultSubscriptionBaseTransferApi;
 import org.killbill.billing.subscription.api.transfer.SubscriptionBaseTransferApi;
@@ -38,47 +33,33 @@ import org.killbill.billing.subscription.api.user.DefaultSubscriptionBaseApiServ
 import org.killbill.billing.subscription.engine.addon.AddonUtils;
 import org.killbill.billing.subscription.engine.core.DefaultSubscriptionBaseService;
 import org.killbill.billing.subscription.engine.dao.DefaultSubscriptionDao;
-import org.killbill.billing.subscription.engine.dao.RepairSubscriptionDao;
 import org.killbill.billing.subscription.engine.dao.SubscriptionDao;
-import org.killbill.billing.util.config.SubscriptionConfig;
+import org.killbill.billing.util.config.definition.SubscriptionConfig;
+import org.killbill.billing.util.glue.KillBillModule;
+import org.skife.config.ConfigurationObjectFactory;
 
-import com.google.inject.AbstractModule;
-import com.google.inject.name.Names;
+public class DefaultSubscriptionModule extends KillBillModule implements SubscriptionModule {
 
-public class DefaultSubscriptionModule extends AbstractModule implements SubscriptionModule {
-
-    public static final String REPAIR_NAMED = "repair";
-
-    protected final ConfigSource configSource;
-
-    public DefaultSubscriptionModule(final ConfigSource configSource) {
-        this.configSource = configSource;
+    public DefaultSubscriptionModule(final KillbillConfigSource configSource) {
+        super(configSource);
     }
 
     protected void installConfig() {
-        final SubscriptionConfig config = new ConfigurationObjectFactory(configSource).build(SubscriptionConfig.class);
+        final SubscriptionConfig config = new ConfigurationObjectFactory(skifeConfigSource).build(SubscriptionConfig.class);
         bind(SubscriptionConfig.class).toInstance(config);
     }
 
     protected void installSubscriptionDao() {
         bind(SubscriptionDao.class).to(DefaultSubscriptionDao.class).asEagerSingleton();
-        bind(SubscriptionDao.class).annotatedWith(Names.named(REPAIR_NAMED)).to(RepairSubscriptionDao.class);
-        bind(RepairSubscriptionLifecycleDao.class).annotatedWith(Names.named(REPAIR_NAMED)).to(RepairSubscriptionDao.class);
-        bind(RepairSubscriptionDao.class).asEagerSingleton();
     }
 
     protected void installSubscriptionCore() {
-        bind(SubscriptionBaseApiService.class).annotatedWith(Names.named(REPAIR_NAMED)).to(RepairSubscriptionApiService.class).asEagerSingleton();
         bind(SubscriptionBaseApiService.class).to(DefaultSubscriptionBaseApiService.class).asEagerSingleton();
-
         bind(DefaultSubscriptionBaseService.class).asEagerSingleton();
         bind(PlanAligner.class).asEagerSingleton();
         bind(AddonUtils.class).asEagerSingleton();
-        bind(MigrationPlanAligner.class).asEagerSingleton();
-
         installSubscriptionService();
         installSubscriptionTimelineApi();
-        installSubscriptionMigrationApi();
         installSubscriptionInternalApi();
         installSubscriptionTransferApi();
     }
@@ -98,11 +79,6 @@ public class DefaultSubscriptionModule extends AbstractModule implements Subscri
     @Override
     public void installSubscriptionTimelineApi() {
         bind(SubscriptionBaseTimelineApi.class).to(DefaultSubscriptionBaseTimelineApi.class).asEagerSingleton();
-    }
-
-    @Override
-    public void installSubscriptionMigrationApi() {
-        bind(SubscriptionBaseMigrationApi.class).to(DefaultSubscriptionBaseMigrationApi.class).asEagerSingleton();
     }
 
     @Override

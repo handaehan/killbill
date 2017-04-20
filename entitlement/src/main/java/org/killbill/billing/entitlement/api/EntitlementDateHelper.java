@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,101 +18,44 @@
 
 package org.killbill.billing.entitlement.api;
 
+import javax.annotation.Nullable;
+
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-
-import org.killbill.billing.account.api.Account;
-import org.killbill.billing.account.api.AccountApiException;
-import org.killbill.billing.account.api.AccountInternalApi;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.clock.Clock;
 
 public class EntitlementDateHelper {
 
-    private final AccountInternalApi accountApi;
     private final Clock clock;
 
-    public EntitlementDateHelper(final AccountInternalApi accountApi, final Clock clock) {
-        this.accountApi = accountApi;
+    public EntitlementDateHelper(final Clock clock) {
         this.clock = clock;
     }
 
-    public DateTime fromNowAndReferenceTime(final DateTime referenceDateTime, final InternalTenantContext callContext) throws EntitlementApiException {
-        try {
-            final Account account = accountApi.getAccountByRecordId(callContext.getAccountRecordId(), callContext);
-            return fromNowAndReferenceTime(referenceDateTime, account.getTimeZone());
-        } catch (AccountApiException e) {
-            throw new EntitlementApiException(e);
-        }
+    public DateTime fromLocalDateAndReferenceTime(@Nullable final LocalDate requestedDate, final InternalTenantContext callContext) throws EntitlementApiException {
+        return requestedDate == null ? clock.getUTCNow() : callContext.toUTCDateTime(requestedDate);
     }
 
-    public DateTime fromNowAndReferenceTime(final DateTime referenceDateTime, final DateTimeZone accountTimeZone) {
-        final LocalDate localDateNowInAccountTimezone = new LocalDate(clock.getUTCNow(), accountTimeZone);
-        return fromLocalDateAndReferenceTime(localDateNowInAccountTimezone, referenceDateTime, accountTimeZone);
-    }
 
-    public DateTime fromLocalDateAndReferenceTime(final LocalDate requestedDate, final DateTime referenceDateTime, final InternalTenantContext callContext) throws EntitlementApiException {
-        try {
-            final Account account = accountApi.getAccountByRecordId(callContext.getAccountRecordId(), callContext);
-            return fromLocalDateAndReferenceTime(requestedDate, referenceDateTime, account.getTimeZone());
-        } catch (AccountApiException e) {
-            throw new EntitlementApiException(e);
-        }
-    }
-
-    public DateTime fromLocalDateAndReferenceTime(final LocalDate requestedDate, final DateTime referenceDateTime, final DateTimeZone accountTimeZone) {
-        final LocalDate localDateNowInAccountTimezone = new LocalDate(requestedDate, accountTimeZone);
-        // Datetime from local date in account timezone and with given reference time
-        final DateTime t1 = localDateNowInAccountTimezone.toDateTime(referenceDateTime.toLocalTime(), accountTimeZone);
-        // Datetime converted back in UTC
-        final DateTime t2 = new DateTime(t1, DateTimeZone.UTC);
-
-        //
-        // Ok, in the case of a LocalDate of today we expect any change to be immediate, so we check that DateTime returned is not in the future
-        // (which means that reference time might not be honored, but this is not very important).
-        //
-        return adjustDateTimeToNotBeInFutureIfLocaDateIsToday(t2, accountTimeZone);
-    }
-
-    private DateTime adjustDateTimeToNotBeInFutureIfLocaDateIsToday(final DateTime inputUtc, final DateTimeZone accountTimeZone) {
-        // If the LocalDate is TODAY but after adding the reference time we end up in the future, we correct it to be NOW,
-        // so change occurs immediately.
-        // If the LocalDate is TODAY but after adding the reference time we end up in the past, we also correct it to NOW,
-        // so we don't end up having events between this time and NOW.
-        // Note that in both these cases, we won't respect the reference time.
-        if (isEqualsToday(inputUtc, accountTimeZone)) {
-            return clock.getUTCNow();
-        } else {
-            return inputUtc;
-        }
-    }
-
-    /**
-     * Check if the date portion of a date/time is equals at today (as returned by the clock).
-     *
-     * @param inputDate       the fully qualified DateTime
-     * @param accountTimeZone the account timezone
-     * @return true if the inputDate, once converted into a LocalDate using account timezone is equals at today
-     */
-    private boolean isEqualsToday(final DateTime inputDate, final DateTimeZone accountTimeZone) {
-        final LocalDate localDateNowInAccountTimezone = new LocalDate(clock.getUTCNow(), accountTimeZone);
-        final LocalDate targetDateInAccountTimezone = new LocalDate(inputDate, accountTimeZone);
-
-        return targetDateInAccountTimezone.compareTo(localDateNowInAccountTimezone) == 0;
+    public DateTime fromLocalDateAndReferenceTimeWithMinimum(@Nullable final LocalDate requestedDate, final DateTime min, final InternalTenantContext callContext) throws EntitlementApiException {
+        final DateTime candidate = fromLocalDateAndReferenceTime(requestedDate, callContext);
+        return candidate.compareTo(min) < 0 ? min : candidate;
     }
 
     /**
      * Check if the date portion of a date/time is before or equals at now (as returned by the clock).
      *
-     * @param inputDate       the fully qualified DateTime
-     * @param accountTimeZone the account timezone
+     * @param inputDate             the fully qualified DateTime
+     * @param accountTimeZone       the account timezone
+     * @param internalTenantContext the context
      * @return true if the inputDate, once converted into a LocalDate using account timezone is less or equals than today
      */
-    public boolean isBeforeOrEqualsToday(final DateTime inputDate, final DateTimeZone accountTimeZone) {
-        final LocalDate localDateNowInAccountTimezone = new LocalDate(clock.getUTCNow(), accountTimeZone);
-        final LocalDate targetDateInAccountTimezone = new LocalDate(inputDate, accountTimeZone);
-
+    // TODO Move to ClockUtils
+    public boolean isBeforeOrEqualsToday(final DateTime inputDate, final DateTimeZone accountTimeZone, final InternalTenantContext internalTenantContext) {
+        final LocalDate localDateNowInAccountTimezone = clock.getToday(accountTimeZone);
+        final LocalDate targetDateInAccountTimezone = internalTenantContext.toLocalDate(inputDate);
         return targetDateInAccountTimezone.compareTo(localDateNowInAccountTimezone) <= 0;
     }
 }

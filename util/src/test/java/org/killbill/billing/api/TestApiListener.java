@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -18,32 +20,35 @@ package org.killbill.billing.api;
 
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Stack;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
 
-import org.joda.time.DateTime;
+import org.killbill.billing.events.BlockingTransitionInternalEvent;
+import org.killbill.billing.events.BroadcastInternalEvent;
+import org.killbill.billing.events.CustomFieldEvent;
+import org.killbill.billing.events.EffectiveSubscriptionInternalEvent;
+import org.killbill.billing.events.InvoiceAdjustmentInternalEvent;
+import org.killbill.billing.events.InvoiceCreationInternalEvent;
+import org.killbill.billing.events.InvoiceNotificationInternalEvent;
+import org.killbill.billing.events.InvoicePaymentErrorInternalEvent;
+import org.killbill.billing.events.InvoicePaymentInfoInternalEvent;
+import org.killbill.billing.events.NullInvoiceInternalEvent;
+import org.killbill.billing.events.PaymentErrorInternalEvent;
+import org.killbill.billing.events.PaymentInfoInternalEvent;
+import org.killbill.billing.events.PaymentPluginErrorInternalEvent;
+import org.killbill.billing.events.TagDefinitionInternalEvent;
+import org.killbill.billing.events.TagInternalEvent;
+import org.killbill.clock.Clock;
 import org.skife.jdbi.v2.Handle;
 import org.skife.jdbi.v2.IDBI;
 import org.skife.jdbi.v2.tweak.HandleCallback;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.Assert;
-
-import org.killbill.billing.events.BlockingTransitionInternalEvent;
-import org.killbill.billing.events.CustomFieldEvent;
-import org.killbill.billing.events.EffectiveEntitlementInternalEvent;
-import org.killbill.billing.events.EffectiveSubscriptionInternalEvent;
-import org.killbill.billing.events.InvoiceAdjustmentInternalEvent;
-import org.killbill.billing.events.InvoiceCreationInternalEvent;
-import org.killbill.billing.events.PaymentErrorInternalEvent;
-import org.killbill.billing.events.PaymentInfoInternalEvent;
-import org.killbill.billing.events.PaymentPluginErrorInternalEvent;
-import org.killbill.billing.events.RepairSubscriptionInternalEvent;
-import org.killbill.billing.events.TagDefinitionInternalEvent;
-import org.killbill.billing.events.TagInternalEvent;
 
 import com.google.common.base.Joiner;
 import com.google.common.eventbus.Subscribe;
@@ -62,6 +67,7 @@ public class TestApiListener {
 
     private final List<NextEvent> nextExpectedEvent;
     private final IDBI idbi;
+    private final Clock clock;
 
     private boolean isListenerFailed = false;
     private String listenerFailedMsg;
@@ -69,13 +75,20 @@ public class TestApiListener {
     private volatile boolean completed;
 
     @Inject
-    public TestApiListener(final IDBI idbi) {
+    public TestApiListener(final IDBI idbi, final Clock clock) {
         nextExpectedEvent = new Stack<NextEvent>();
         this.completed = false;
         this.idbi = idbi;
+        this.clock = clock;
     }
 
     public void assertListenerStatus() {
+        // Bail early
+        if (isListenerFailed) {
+            log.error(listenerFailedMsg);
+            Assert.fail(listenerFailedMsg);
+        }
+
         try {
             assertTrue(isCompleted(DELAY));
         } catch (final Exception e) {
@@ -89,11 +102,9 @@ public class TestApiListener {
     }
 
     public enum NextEvent {
-        MIGRATE_ENTITLEMENT,
-        MIGRATE_BILLING,
+        BROADCAST_SERVICE,
         CREATE,
         TRANSFER,
-        RE_CREATE,
         CHANGE,
         CANCEL,
         UNCANCEL,
@@ -101,37 +112,26 @@ public class TestApiListener {
         RESUME,
         PHASE,
         BLOCK,
+        NULL_INVOICE,
         INVOICE,
+        INVOICE_NOTIFICATION,
         INVOICE_ADJUSTMENT,
+        INVOICE_PAYMENT,
+        INVOICE_PAYMENT_ERROR,
         PAYMENT,
         PAYMENT_ERROR,
         PAYMENT_PLUGIN_ERROR,
-        REPAIR_BUNDLE,
         TAG,
         TAG_DEFINITION,
         CUSTOM_FIELD,
+        BCD_CHANGE
     }
 
     @Subscribe
-    public void handleRepairSubscriptionEvents(final RepairSubscriptionInternalEvent event) {
-        log.info(String.format("Got RepairSubscriptionEvent event %s", event.toString()));
-        assertEqualsNicely(NextEvent.REPAIR_BUNDLE);
+    public void handleBroadcastEvents(final BroadcastInternalEvent event) {
+        log.info(String.format("Got BroadcastInternalEvent event %s", event.toString()));
+        assertEqualsNicely(NextEvent.BROADCAST_SERVICE);
         notifyIfStackEmpty();
-    }
-
-    @Subscribe
-    public void handleEntitlementEvents(final EffectiveEntitlementInternalEvent eventEffective) {
-        log.info(String.format("Got entitlement event %s", eventEffective.toString()));
-        switch (eventEffective.getTransitionType()) {
-            case BLOCK_BUNDLE:
-                assertEqualsNicely(NextEvent.PAUSE);
-                notifyIfStackEmpty();
-                break;
-            case UNBLOCK_BUNDLE:
-                assertEqualsNicely(NextEvent.RESUME);
-                notifyIfStackEmpty();
-                break;
-        }
     }
 
     @Subscribe
@@ -144,25 +144,16 @@ public class TestApiListener {
     @Subscribe
     public void handleSubscriptionEvents(final EffectiveSubscriptionInternalEvent eventEffective) {
         log.info(String.format("Got subscription event %s", eventEffective.toString()));
+
+        Assert.assertNotNull(eventEffective.getBundleExternalKey());
+
         switch (eventEffective.getTransitionType()) {
             case TRANSFER:
                 assertEqualsNicely(NextEvent.TRANSFER);
                 notifyIfStackEmpty();
                 break;
-            case MIGRATE_ENTITLEMENT:
-                assertEqualsNicely(NextEvent.MIGRATE_ENTITLEMENT);
-                notifyIfStackEmpty();
-                break;
-            case MIGRATE_BILLING:
-                assertEqualsNicely(NextEvent.MIGRATE_BILLING);
-                notifyIfStackEmpty();
-                break;
             case CREATE:
                 assertEqualsNicely(NextEvent.CREATE);
-                notifyIfStackEmpty();
-                break;
-            case RE_CREATE:
-                assertEqualsNicely(NextEvent.RE_CREATE);
                 notifyIfStackEmpty();
                 break;
             case CANCEL:
@@ -179,6 +170,10 @@ public class TestApiListener {
                 break;
             case PHASE:
                 assertEqualsNicely(NextEvent.PHASE);
+                notifyIfStackEmpty();
+                break;
+            case BCD_CHANGE:
+                assertEqualsNicely(NextEvent.BCD_CHANGE);
                 notifyIfStackEmpty();
                 break;
             default:
@@ -208,6 +203,20 @@ public class TestApiListener {
     }
 
     @Subscribe
+    public void handleInvoiceNotificationEvents(final InvoiceNotificationInternalEvent event) {
+        log.info(String.format("Got Invoice notification event %s", event.toString()));
+        assertEqualsNicely(NextEvent.INVOICE_NOTIFICATION);
+        notifyIfStackEmpty();
+    }
+
+    @Subscribe
+    public void handleNullInvoiceEvents(final NullInvoiceInternalEvent event) {
+        log.info(String.format("Got Null Invoice event %s", event.toString()));
+        assertEqualsNicely(NextEvent.NULL_INVOICE);
+        notifyIfStackEmpty();
+    }
+
+    @Subscribe
     public void handleInvoiceEvents(final InvoiceCreationInternalEvent event) {
         log.info(String.format("Got Invoice event %s", event.toString()));
         assertEqualsNicely(NextEvent.INVOICE);
@@ -218,6 +227,20 @@ public class TestApiListener {
     public void handleInvoiceAdjustmentEvents(final InvoiceAdjustmentInternalEvent event) {
         log.info(String.format("Got Invoice adjustment event %s", event.toString()));
         assertEqualsNicely(NextEvent.INVOICE_ADJUSTMENT);
+        notifyIfStackEmpty();
+    }
+
+    @Subscribe
+    public void handleInvoicePaymentEvents(final InvoicePaymentInfoInternalEvent event) {
+        log.info(String.format("Got InvoicePaymentInfo event %s", event.toString()));
+        assertEqualsNicely(NextEvent.INVOICE_PAYMENT);
+        notifyIfStackEmpty();
+    }
+
+    @Subscribe
+    public void handleInvoicePaymentErrorEvents(final InvoicePaymentErrorInternalEvent event) {
+        log.info(String.format("Got InvoicePaymentError event %s", event.toString()));
+        assertEqualsNicely(NextEvent.INVOICE_PAYMENT_ERROR);
         notifyIfStackEmpty();
     }
 
@@ -268,39 +291,35 @@ public class TestApiListener {
 
     public boolean isCompleted(final long timeout) {
         synchronized (this) {
-            if (completed) {
-                return completed;
-            }
             long waitTimeMs = timeout;
             do {
                 try {
-                    final DateTime before = new DateTime();
-                    wait(500);
+                    final long before = System.currentTimeMillis();
+                    wait(100);
                     if (completed) {
                         // TODO PIERRE Kludge alert!
                         // When we arrive here, we got notified by the current thread (Bus listener) that we received
                         // all expected events. But other handlers might still be processing them.
                         // Since there is only one bus thread, and that the test thread waits for all events to be processed,
                         // we're guaranteed that all are processed when the bus events table is empty.
+                        // We also need to wait for in-processing notifications (see https://github.com/killbill/killbill/issues/475).
+                        // This is really similar to TestResource#waitForNotificationToComplete.
                         await().atMost(timeout, TimeUnit.MILLISECONDS).until(new Callable<Boolean>() {
                             @Override
                             public Boolean call() throws Exception {
-                                final long inProcessingBusEvents = idbi.withHandle(new HandleCallback<Long>() {
-                                    @Override
-                                    public Long withHandle(final Handle handle) throws Exception {
-                                        return (Long) handle.select("select count(distinct record_id) count from bus_events").get(0).get("count");
-                                    }
-                                });
-                                log.debug("Events still in processing: " + inProcessingBusEvents);
-                                return inProcessingBusEvents == 0;
+                                final long pending = idbi.withHandle(new PendingBusOrNotificationCallback(clock));
+                                log.debug("Events still in processing: {}", pending);
+                                return pending == 0;
                             }
                         });
                         return completed;
                     }
-                    final DateTime after = new DateTime();
-                    waitTimeMs -= after.getMillis() - before.getMillis();
+                    final long after = System.currentTimeMillis();
+                    waitTimeMs -= (after - before);
                 } catch (final Exception ignore) {
-                    log.error("isCompleted got interrupted ", ignore);
+                    // Rerun one more time to provide details
+                    final long pending = idbi.withHandle(new PendingBusOrNotificationCallback(clock));
+                    log.error("isCompleted : Received all events but found remaining unprocessed bus events/notifications =  {}", pending);
                     return false;
                 }
             } while (waitTimeMs > 0 && !completed);
@@ -310,8 +329,22 @@ public class TestApiListener {
             final Joiner joiner = Joiner.on(" ");
             log.error("TestApiListener did not complete in " + timeout + " ms, remaining events are " + joiner.join(nextExpectedEvent));
         }
-
         return completed;
+    }
+
+    private static class PendingBusOrNotificationCallback implements HandleCallback<Long> {
+
+        private final Clock clock;
+
+        public PendingBusOrNotificationCallback(final Clock clock) {
+            this.clock = clock;
+        }
+        @Override
+        public Long withHandle(final Handle handle) throws Exception {
+            return (Long) handle.select("select count(distinct record_id) count from bus_events").get(0).get("count") +
+                   (Long) handle.select("select count(distinct record_id) count from notifications where effective_date < ?", clock.getUTCNow().toDate()).get(0).get("count") +
+                   (Long) handle.select("select count(distinct record_id) count from notifications where processing_state = 'IN_PROCESSING'").get(0).get("count");
+        }
     }
 
     private void notifyIfStackEmpty() {

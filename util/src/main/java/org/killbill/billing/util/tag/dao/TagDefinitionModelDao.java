@@ -20,13 +20,14 @@ import java.util.UUID;
 
 import org.joda.time.DateTime;
 
+import org.killbill.billing.util.UUIDs;
 import org.killbill.billing.util.dao.TableName;
-import org.killbill.billing.entity.EntityBase;
 import org.killbill.billing.util.entity.dao.EntityModelDao;
+import org.killbill.billing.util.entity.dao.EntityModelDaoBase;
 import org.killbill.billing.util.tag.ControlTagType;
 import org.killbill.billing.util.tag.TagDefinition;
 
-public class TagDefinitionModelDao extends EntityBase implements EntityModelDao<TagDefinition> {
+public class TagDefinitionModelDao extends EntityModelDaoBase implements EntityModelDao<TagDefinition> {
 
     private String name;
     private String description;
@@ -46,7 +47,7 @@ public class TagDefinitionModelDao extends EntityBase implements EntityModelDao<
     }
 
     public TagDefinitionModelDao(final DateTime createdDate, final String name, final String description) {
-        this(UUID.randomUUID(), createdDate, createdDate, name, description);
+        this(UUIDs.randomUUID(), createdDate, createdDate, name, description);
     }
 
     public TagDefinitionModelDao(final TagDefinition tagDefinition) {

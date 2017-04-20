@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,9 +21,10 @@ package org.killbill.billing.entity;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-
+import org.killbill.billing.util.UUIDs;
 import org.killbill.billing.util.entity.Entity;
 
+// Note: not suitable for Serializable Entity classes (e.g. DefaultTenant)
 public abstract class EntityBase implements Entity {
 
     protected UUID id;
@@ -35,7 +38,7 @@ public abstract class EntityBase implements Entity {
 
     // used to create new objects
     public EntityBase() {
-        this(UUID.randomUUID(), null, null);
+        this(UUIDs.randomUUID(), null, null);
     }
 
     public EntityBase(final UUID id, final DateTime createdDate, final DateTime updatedDate) {
@@ -44,7 +47,7 @@ public abstract class EntityBase implements Entity {
         this.updatedDate = updatedDate;
     }
 
-    public EntityBase(final EntityBase target) {
+    public EntityBase(final Entity target) {
         this.id = target.getId();
         this.createdDate = target.getCreatedDate();
         this.updatedDate = target.getUpdatedDate();
@@ -90,10 +93,10 @@ public abstract class EntityBase implements Entity {
         if (id != null ? !id.equals(that.id) : that.id != null) {
             return false;
         }
-        if (createdDate != null ? !createdDate.equals(that.createdDate) : that.createdDate != null) {
+        if (createdDate != null ? createdDate.compareTo(that.createdDate) != 0 : that.createdDate != null) {
             return false;
         }
-        if (updatedDate != null ? !updatedDate.equals(that.updatedDate) : that.updatedDate != null) {
+        if (updatedDate != null ? updatedDate.compareTo(that.updatedDate) != 0 : that.updatedDate != null) {
             return false;
         }
 

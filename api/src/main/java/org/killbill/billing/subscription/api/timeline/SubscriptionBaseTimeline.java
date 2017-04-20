@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,66 +24,47 @@ import java.util.UUID;
 import org.joda.time.DateTime;
 
 import org.killbill.billing.catalog.api.PlanPhaseSpecifier;
+import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
 import org.killbill.billing.util.entity.Entity;
 
 /**
  * The interface {@code} shows a view of all the events for a particular {@code SubscriptionBase}.
  * <p/>
- * It can be used to display information, or it can be used to modify the subscription stream of events
- * and 'repair' the stream by versioning the events.
  */
 public interface SubscriptionBaseTimeline extends Entity {
 
-    /**
-     * @return the list of events that should be deleted when repairing the stream.
-     */
-    public List<DeletedEvent> getDeletedEvents();
-
-    /**
-     * @return the list of events that should be added when repairing the stream
-     */
-    public List<NewEvent> getNewEvents();
 
     /**
      * @return the current list of events for that {@code SubscriptionBase}
      */
     public List<ExistingEvent> getExistingEvents();
 
-    /**
-     * @return the active version for the event stream
-     */
-    public long getActiveVersion();
 
-
-    public interface DeletedEvent {
+    public interface ExistingEvent {
 
         /**
          * @return the unique if for the event to delete
          */
         public UUID getEventId();
-    }
-
-    public interface NewEvent {
 
         /**
+         *
          * @return the description for the event to be added
          */
         public PlanPhaseSpecifier getPlanPhaseSpecifier();
 
-        /**
-         * @return the date at which this event should be inserted into the stream
-         */
-        public DateTime getRequestedDate();
 
         /**
          * @return the {@code SubscriptionBaseTransitionType} for the event
          */
         public SubscriptionBaseTransitionType getSubscriptionTransitionType();
 
-    }
-
-    public interface ExistingEvent extends DeletedEvent, NewEvent {
+        /**
+         *
+         * @return the product category
+         */
+        public ProductCategory getProductCategory();
 
         /**
          * @return the date at which this event was effective
@@ -89,8 +72,19 @@ public interface SubscriptionBaseTimeline extends Entity {
         public DateTime getEffectiveDate();
 
         /**
+         * @return the name of the plan
+         */
+        public String getPlanName();
+
+        /**
          * @return the name of the phase
          */
         public String getPlanPhaseName();
+
+        /**
+         *
+         * @return the new billCycleDayLocal
+         */
+        public Integer getBillCycleDayLocal();
     }
 }

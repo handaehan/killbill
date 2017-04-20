@@ -58,11 +58,13 @@ public interface SubscriptionBaseTransition {
 
     public PriceList getNextPriceList();
 
-    public DateTime getRequestedTransitionTime();
-
     public DateTime getEffectiveTransitionTime();
 
     public SubscriptionBaseTransitionType getTransitionType();
+
+    public Integer getPreviousBillingCycleDayLocal();
+
+    public Integer getNextBillingCycleDayLocal();
 
     public DateTime getCreatedDate();
 }

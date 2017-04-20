@@ -16,6 +16,7 @@
 
 package org.killbill.billing.mock;
 
+import java.util.Collection;
 import java.util.UUID;
 
 import org.killbill.billing.catalog.api.BillingPeriod;
@@ -23,24 +24,19 @@ import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.Product;
 
+import com.google.common.collect.ImmutableList;
+
 public class MockPriceList implements PriceList {
     private final String name;
-    private final Boolean isRetired;
     private final Plan plan;
 
     public MockPriceList() {
-        this(false, UUID.randomUUID().toString(), new MockPlan());
+        this(UUID.randomUUID().toString(), new MockPlan());
     }
 
-    public MockPriceList(final Boolean retired, final String name, final Plan plan) {
-        isRetired = retired;
+    public MockPriceList(final String name, final Plan plan) {
         this.name = name;
         this.plan = plan;
-    }
-
-    @Override
-    public boolean isRetired() {
-        return isRetired;
     }
 
     @Override
@@ -49,8 +45,8 @@ public class MockPriceList implements PriceList {
     }
 
     @Override
-    public Plan findPlan(final Product product, final BillingPeriod period) {
-        return plan;
+    public Collection<Plan> findPlans(final Product product, final BillingPeriod period) {
+        return ImmutableList.of(plan);
     }
 
     public Plan getPlan() {
@@ -58,7 +54,8 @@ public class MockPriceList implements PriceList {
     }
 
     @Override
-    public Plan[] getPlans() {
-        return new Plan[] { plan };
+    public Collection<Plan> getPlans() {
+        return ImmutableList.of(plan);
     }
+
 }

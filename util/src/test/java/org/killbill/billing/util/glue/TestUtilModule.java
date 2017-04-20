@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,31 +18,32 @@
 
 package org.killbill.billing.util.glue;
 
-import org.mockito.Mockito;
-import org.skife.config.ConfigSource;
-
+import org.killbill.billing.mock.glue.MockAccountModule;
+import org.killbill.billing.mock.glue.MockTenantModule;
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.subscription.api.timeline.SubscriptionBaseTimelineApi;
+import org.mockito.Mockito;
 
-import com.google.inject.AbstractModule;
+public class TestUtilModule extends KillBillModule {
 
-public class TestUtilModule extends AbstractModule {
-
-    protected final ConfigSource configSource;
-
-    public TestUtilModule(final ConfigSource configSource) {
-        this.configSource = configSource;
+    public TestUtilModule(final KillbillConfigSource configSource) {
+        super(configSource);
     }
 
-    // TODO STEPH this is bad-- because DefaultAuditUserApi is using SubscriptionBaseTimeline API
-    public void installHack() {
+    // TODO this is bad!
+    public void installHacks() {
+        // DefaultAuditUserApi is using SubscriptionBaseTimeline API
         bind(SubscriptionBaseTimelineApi.class).toInstance(Mockito.mock(SubscriptionBaseTimelineApi.class));
+        // InternalCallContextFactory is using AccountInternalApi
+        install(new MockAccountModule(configSource));
     }
 
     @Override
     protected void configure() {
         //install(new CallContextModule());
         install(new CacheModule(configSource));
-
-        installHack();
+        install(new ConfigModule(configSource));
+        install(new MockTenantModule(configSource));
+        installHacks();
     }
 }

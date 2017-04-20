@@ -29,7 +29,7 @@ import org.killbill.billing.util.api.AuditLevel;
 import com.google.common.base.Predicate;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterators;
+import com.google.common.collect.ImmutableSet;
 
 public class DefaultAccountAuditLogs implements AccountAuditLogs {
 
@@ -40,7 +40,7 @@ public class DefaultAccountAuditLogs implements AccountAuditLogs {
     private final Map<ObjectType, DefaultAccountAuditLogsForObjectType> auditLogsCache = new HashMap<ObjectType, DefaultAccountAuditLogsForObjectType>();
 
     public DefaultAccountAuditLogs(final UUID accountId) {
-        this(accountId, AuditLevel.NONE, Iterators.<AuditLog>emptyIterator());
+        this(accountId, AuditLevel.NONE, ImmutableSet.<AuditLog>of().iterator());
     }
 
     public DefaultAccountAuditLogs(final UUID accountId, final AuditLevel auditLevel, final Iterator<AuditLog> accountAuditLogsOrderedByTableName) {
@@ -91,18 +91,18 @@ public class DefaultAccountAuditLogs implements AccountAuditLogs {
     }
 
     @Override
+    public List<AuditLog> getAuditLogsForPaymentTransaction(final UUID paymentTransactionId) {
+        return getAuditLogs(ObjectType.TRANSACTION).getAuditLogs(paymentTransactionId);
+    }
+
+    @Override
+    public List<AuditLog> getAuditLogsForPaymentAttempt(final UUID paymentAttemptId) {
+        return getAuditLogs(ObjectType.PAYMENT_ATTEMPT).getAuditLogs(paymentAttemptId);
+    }
+
+    @Override
     public List<AuditLog> getAuditLogsForPaymentMethod(final UUID paymentMethodId) {
         return getAuditLogs(ObjectType.PAYMENT_METHOD).getAuditLogs(paymentMethodId);
-    }
-
-    @Override
-    public List<AuditLog> getAuditLogsForRefund(final UUID refundId) {
-        return getAuditLogs(ObjectType.REFUND).getAuditLogs(refundId);
-    }
-
-    @Override
-    public List<AuditLog> getAuditLogsForChargeback(final UUID chargebackId) {
-        return getAuditLogs(ObjectType.INVOICE_PAYMENT).getAuditLogs(chargebackId);
     }
 
     @Override

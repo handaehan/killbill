@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,20 +24,20 @@ import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
 import org.joda.time.Interval;
-import org.testng.Assert;
-import org.testng.annotations.Test;
-
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.api.TestApiListener.NextEvent;
 import org.killbill.billing.catalog.api.BillingActionPolicy;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.Duration;
 import org.killbill.billing.catalog.api.PlanPhase;
+import org.killbill.billing.catalog.api.PlanSpecifier;
 import org.killbill.billing.catalog.api.PriceListSet;
-import org.killbill.clock.DefaultClock;
 import org.killbill.billing.subscription.SubscriptionTestSuiteNoDB;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.exceptions.SubscriptionBaseError;
+import org.killbill.clock.DefaultClock;
+import org.testng.Assert;
+import org.testng.annotations.Test;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
@@ -51,7 +53,7 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
         // TODO: MARTIN TO FIX WITH CORRECT ERROR CODE. RIGHT NOW NPE
 
         // WRONG BILLING PERIOD
-        tCreateSubscriptionInternal(bundle.getId(), "Shotgun", null, PriceListSet.DEFAULT_PRICELIST_NAME, ErrorCode.CAT_PLAN_NOT_FOUND);
+        tCreateSubscriptionInternal(bundle.getId(), "Shotgun", null, PriceListSet.DEFAULT_PRICELIST_NAME, ErrorCode.CAT_NULL_BILLING_PERIOD);
         // WRONG PLAN SET
         tCreateSubscriptionInternal(bundle.getId(), "Shotgun", BillingPeriod.ANNUAL, "Whatever", ErrorCode.CAT_PRICE_LIST_NOT_FOUND);
     }
@@ -74,16 +76,20 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
 
     @Test(groups = "fast")
     public void testCreateSubscriptionAddOnNotAvailable() throws SubscriptionBaseApiException {
-        final UUID accountId = UUID.randomUUID();
-        final SubscriptionBaseBundle aoBundle = subscriptionInternalApi.createBundleForAccount(accountId, "myAOBundle", internalCallContext);
+        final SubscriptionBaseBundle aoBundle = subscriptionInternalApi.createBundleForAccount(bundle.getAccountId(), "myAOBundle", internalCallContext);
+        mockNonEntityDao.addTenantRecordIdMapping(aoBundle.getId(), internalCallContext);
+        mockNonEntityDao.addAccountRecordIdMapping(aoBundle.getId(), internalCallContext);
+
         testUtil.createSubscriptionWithBundle(aoBundle.getId(), "Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null);
         tCreateSubscriptionInternal(aoBundle.getId(), "Telescopic-Scope", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, ErrorCode.SUB_CREATE_AO_NOT_AVAILABLE);
     }
 
     @Test(groups = "fast")
     public void testCreateSubscriptionAddOnIncluded() throws SubscriptionBaseApiException {
-        final UUID accountId = UUID.randomUUID();
-        final SubscriptionBaseBundle aoBundle = subscriptionInternalApi.createBundleForAccount(accountId, "myAOBundle", internalCallContext);
+        final SubscriptionBaseBundle aoBundle = subscriptionInternalApi.createBundleForAccount(bundle.getAccountId(), "myAOBundle", internalCallContext);
+        mockNonEntityDao.addTenantRecordIdMapping(aoBundle.getId(), internalCallContext);
+        mockNonEntityDao.addAccountRecordIdMapping(aoBundle.getId(), internalCallContext);
+
         testUtil.createSubscriptionWithBundle(aoBundle.getId(), "Assault-Rifle", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null);
         tCreateSubscriptionInternal(aoBundle.getId(), "Telescopic-Scope", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, ErrorCode.SUB_CREATE_AO_ALREADY_INCLUDED);
     }
@@ -93,9 +99,9 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
         try {
             subscriptionInternalApi.createSubscription(bundleId,
                                                        testUtil.getProductSpecifier(productName, planSet, term, null),
-                                                       clock.getUTCNow(), internalCallContext);
+                                                       null, clock.getUTCNow(), false, internalCallContext);
             Assert.fail("Exception expected, error code: " + expected);
-        } catch (SubscriptionBaseApiException e) {
+        } catch (final SubscriptionBaseApiException e) {
             assertEquals(e.getCode(), expected.getCode());
         }
     }
@@ -107,8 +113,8 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
         testListener.pushExpectedEvent(NextEvent.CANCEL);
         subscription.cancelWithDate(clock.getUTCNow(), callContext);
         try {
-            subscription.changePlanWithDate("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, clock.getUTCNow(), callContext);
-        } catch (SubscriptionBaseApiException e) {
+            subscription.changePlanWithDate(new PlanSpecifier("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME), null, clock.getUTCNow(), callContext);
+        } catch (final SubscriptionBaseApiException e) {
             assertEquals(e.getCode(), ErrorCode.SUB_CHANGE_NON_ACTIVE.getCode());
         }
     }
@@ -118,17 +124,17 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
         final SubscriptionBase subscription = testUtil.createSubscription(bundle, "Shotgun", BillingPeriod.ANNUAL, PriceListSet.DEFAULT_PRICELIST_NAME);
 
         try {
-            subscription.changePlanWithPolicy("Shotgun", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, BillingActionPolicy.ILLEGAL, callContext);
+            subscription.changePlanWithPolicy(new PlanSpecifier("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME), null, BillingActionPolicy.ILLEGAL, callContext);
             Assert.fail();
-        } catch (SubscriptionBaseError error) {
+        } catch (final SubscriptionBaseError error) {
             assertTrue(true);
-            assertEquals(subscriptionInternalApi.getSubscriptionFromId(subscription.getId(), internalCallContext).getCurrentPlan().getBillingPeriod(), BillingPeriod.ANNUAL);
+            assertEquals(subscriptionInternalApi.getSubscriptionFromId(subscription.getId(), internalCallContext).getCurrentPlan().getRecurringBillingPeriod(), BillingPeriod.ANNUAL);
         }
 
         // Assume the call takes less than a second
-        assertEquals(DefaultClock.truncateMs(subscription.changePlanWithPolicy("Shotgun", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, BillingActionPolicy.IMMEDIATE, callContext)),
+        assertEquals(DefaultClock.truncateMs(subscription.changePlanWithPolicy(new PlanSpecifier("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME), null, BillingActionPolicy.IMMEDIATE, callContext)),
                      DefaultClock.truncateMs(clock.getUTCNow()));
-        assertEquals(subscriptionInternalApi.getSubscriptionFromId(subscription.getId(), internalCallContext).getCurrentPlan().getBillingPeriod(), BillingPeriod.MONTHLY);
+        assertEquals(subscriptionInternalApi.getSubscriptionFromId(subscription.getId(), internalCallContext).getCurrentPlan().getRecurringBillingPeriod(), BillingPeriod.MONTHLY);
     }
 
     @Test(groups = "fast")
@@ -151,10 +157,10 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
 
         subscription = subscriptionInternalApi.getSubscriptionFromId(subscription.getId(), internalCallContext);
 
-        subscription.cancelWithPolicy(BillingActionPolicy.END_OF_TERM, callContext);
+        subscription.cancelWithPolicy(BillingActionPolicy.END_OF_TERM, null, -1, callContext);
         try {
-            subscription.changePlanWithDate("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, clock.getUTCNow(), callContext);
-        } catch (SubscriptionBaseApiException e) {
+            subscription.changePlanWithDate(new PlanSpecifier("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME), null, clock.getUTCNow(), callContext);
+        } catch (final SubscriptionBaseApiException e) {
             assertEquals(e.getCode(), ErrorCode.SUB_CHANGE_FUTURE_CANCELLED.getCode());
         }
 
@@ -167,7 +173,7 @@ public class TestUserApiError extends SubscriptionTestSuiteNoDB {
 
         try {
             subscription.uncancel(callContext);
-        } catch (SubscriptionBaseApiException e) {
+        } catch (final SubscriptionBaseApiException e) {
             assertEquals(e.getCode(), ErrorCode.SUB_UNCANCEL_BAD_STATE.getCode());
         }
         assertListenerStatus();

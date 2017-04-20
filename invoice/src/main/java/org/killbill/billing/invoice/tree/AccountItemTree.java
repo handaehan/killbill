@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2014 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -48,14 +50,16 @@ import com.google.common.collect.Iterables;
 public class AccountItemTree {
 
     private final UUID accountId;
+    private final UUID targetInvoiceId;
     private final Map<UUID, SubscriptionItemTree> subscriptionItemTree;
     private final List<InvoiceItem> allExistingItems;
     private List<InvoiceItem> pendingItemAdj;
 
     private boolean isBuilt;
 
-    public AccountItemTree(final UUID accountId) {
+    public AccountItemTree(final UUID accountId, final UUID targetInvoiceId) {
         this.accountId = accountId;
+        this.targetInvoiceId = targetInvoiceId;
         this.subscriptionItemTree = new HashMap<UUID, SubscriptionItemTree>();
         this.isBuilt = false;
         this.allExistingItems = new LinkedList<InvoiceItem>();
@@ -89,14 +93,18 @@ public class AccountItemTree {
         addExistingItem(existingItem, false);
     }
 
-    private void addExistingItem(final InvoiceItem existingItem, boolean failOnMissingSubscription) {
-
+    private void addExistingItem(final InvoiceItem existingItem, final boolean failOnMissingSubscription) {
         Preconditions.checkState(!isBuilt);
+
+        // Only used to retrieve the original item for linked items
+        allExistingItems.add(existingItem);
+
         switch (existingItem.getInvoiceItemType()) {
             case EXTERNAL_CHARGE:
+            case TAX:
             case CBA_ADJ:
             case CREDIT_ADJ:
-            case REFUND_ADJ:
+            case USAGE:
                 return;
 
             case RECURRING:
@@ -104,16 +112,27 @@ public class AccountItemTree {
             case FIXED:
             case ITEM_ADJ:
                 break;
+            case PARENT_SUMMARY:
+                break;
 
             default:
                 Preconditions.checkState(false, "Unknown invoice item type " + existingItem.getInvoiceItemType());
 
         }
 
-        allExistingItems.add(existingItem);
+        if (existingItem.getInvoiceItemType() == InvoiceItemType.ITEM_ADJ) {
+            final InvoiceItem linkedInvoiceItem = getLinkedInvoiceItem(existingItem, allExistingItems);
+            if (linkedInvoiceItem != null &&
+                linkedInvoiceItem.getInvoiceItemType() != InvoiceItemType.RECURRING &&
+                linkedInvoiceItem.getInvoiceItemType() != InvoiceItemType.FIXED) {
+                // We only care about adjustments for recurring and fixed items when building the tree
+                // (we assume that REPAIR_ADJ and ITEM_ADJ items cannot be adjusted)
+                return;
+            }
+        }
 
         final UUID subscriptionId = getSubscriptionId(existingItem, allExistingItems);
-        Preconditions.checkState(subscriptionId != null || !failOnMissingSubscription);
+        Preconditions.checkState(subscriptionId != null || !failOnMissingSubscription, "Missing subscription id");
 
         if (subscriptionId == null && existingItem.getInvoiceItemType() == InvoiceItemType.ITEM_ADJ) {
             pendingItemAdj.add(existingItem);
@@ -121,7 +140,7 @@ public class AccountItemTree {
         }
 
         if (!subscriptionItemTree.containsKey(subscriptionId)) {
-            subscriptionItemTree.put(subscriptionId, new SubscriptionItemTree(subscriptionId));
+            subscriptionItemTree.put(subscriptionId, new SubscriptionItemTree(subscriptionId, targetInvoiceId));
         }
         final SubscriptionItemTree tree = subscriptionItemTree.get(subscriptionId);
         tree.addItem(existingItem);
@@ -143,7 +162,7 @@ public class AccountItemTree {
             final UUID subscriptionId = getSubscriptionId(item, null);
             SubscriptionItemTree tree = subscriptionItemTree.get(subscriptionId);
             if (tree == null) {
-                tree = new SubscriptionItemTree(subscriptionId);
+                tree = new SubscriptionItemTree(subscriptionId, targetInvoiceId);
                 subscriptionItemTree.put(subscriptionId, tree);
             }
             tree.mergeProposedItem(item);
@@ -177,13 +196,25 @@ public class AccountItemTree {
             item.getInvoiceItemType() == InvoiceItemType.FIXED) {
             return item.getSubscriptionId();
         } else {
-            final InvoiceItem linkedItem = Iterables.tryFind(allItems, new Predicate<InvoiceItem>() {
-                @Override
-                public boolean apply(final InvoiceItem input) {
-                    return item.getLinkedItemId().equals(input.getId());
-                }
-            }).orNull();
+            final InvoiceItem linkedItem = getLinkedInvoiceItem(item, allItems);
             return linkedItem != null ? linkedItem.getSubscriptionId() : null;
         }
+    }
+
+    private InvoiceItem getLinkedInvoiceItem(final InvoiceItem item, final Iterable<InvoiceItem> allItems) {
+        return Iterables.tryFind(allItems, new Predicate<InvoiceItem>() {
+            @Override
+            public boolean apply(final InvoiceItem input) {
+                return input.getId().equals(item.getLinkedItemId());
+            }
+        }).orNull();
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("AccountItemTree{");
+        sb.append("subscriptionItemTree=").append(subscriptionItemTree);
+        sb.append('}');
+        return sb.toString();
     }
 }

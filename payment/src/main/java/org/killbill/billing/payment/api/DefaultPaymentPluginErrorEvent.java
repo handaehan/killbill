@@ -16,50 +16,36 @@
 
 package org.killbill.billing.payment.api;
 
+import java.math.BigDecimal;
+import java.util.UUID;
+
+import org.joda.time.DateTime;
+import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.events.PaymentPluginErrorInternalEvent;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import org.killbill.billing.events.BusEventBase;
-import org.killbill.billing.events.PaymentPluginErrorInternalEvent;
 
-import java.util.UUID;
-
-public class DefaultPaymentPluginErrorEvent extends BusEventBase implements PaymentPluginErrorInternalEvent {
+public class DefaultPaymentPluginErrorEvent extends DefaultPaymentInternalEvent implements PaymentPluginErrorInternalEvent {
 
     private final String message;
-    private final UUID accountId;
-    private final UUID invoiceId;
-    private final UUID paymentId;
 
     @JsonCreator
     public DefaultPaymentPluginErrorEvent(@JsonProperty("accountId") final UUID accountId,
-                                          @JsonProperty("invoiceId") final UUID invoiceId,
                                           @JsonProperty("paymentId") final UUID paymentId,
+                                          @JsonProperty("paymentTransactionId") final UUID paymentTransactionId,
+                                          @JsonProperty("amount") final BigDecimal amount,
+                                          @JsonProperty("currency") final Currency currency,
+                                          @JsonProperty("status") final TransactionStatus status,
+                                          @JsonProperty("transactionType") final TransactionType transactionType,
+                                          @JsonProperty("effectiveDate") final DateTime effectiveDate,
                                           @JsonProperty("message") final String message,
                                           @JsonProperty("searchKey1") final Long searchKey1,
                                           @JsonProperty("searchKey2") final Long searchKey2,
                                           @JsonProperty("userToken") final UUID userToken) {
-        super(searchKey1, searchKey2, userToken);
+        super(accountId, paymentId, paymentTransactionId, amount, currency, status, transactionType, effectiveDate, searchKey1, searchKey2, userToken);
         this.message = message;
-        this.accountId = accountId;
-        this.invoiceId = invoiceId;
-        this.paymentId = paymentId;
-    }
-
-    public String getMessage() {
-        return message;
-    }
-
-    public UUID getAccountId() {
-        return accountId;
-    }
-
-    public UUID getInvoiceId() {
-        return invoiceId;
-    }
-
-    public UUID getPaymentId() {
-        return paymentId;
     }
 
     @JsonIgnore
@@ -69,38 +55,12 @@ public class DefaultPaymentPluginErrorEvent extends BusEventBase implements Paym
     }
 
     @Override
-    public boolean equals(final Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof DefaultPaymentPluginErrorEvent)) {
-            return false;
-        }
-
-        final DefaultPaymentPluginErrorEvent that = (DefaultPaymentPluginErrorEvent) o;
-
-        if (accountId != null ? !accountId.equals(that.accountId) : that.accountId != null) {
-            return false;
-        }
-        if (invoiceId != null ? !invoiceId.equals(that.invoiceId) : that.invoiceId != null) {
-            return false;
-        }
-        if (message != null ? !message.equals(that.message) : that.message != null) {
-            return false;
-        }
-        if (paymentId != null ? !paymentId.equals(that.paymentId) : that.paymentId != null) {
-            return false;
-        }
-
-        return true;
+    public String getMessage() {
+        return message;
     }
 
     @Override
-    public int hashCode() {
-        int result = message != null ? message.hashCode() : 0;
-        result = 31 * result + (accountId != null ? accountId.hashCode() : 0);
-        result = 31 * result + (invoiceId != null ? invoiceId.hashCode() : 0);
-        result = 31 * result + (paymentId != null ? paymentId.hashCode() : 0);
-        return result;
+    protected Class getPaymentInternalEventClass() {
+        return DefaultPaymentPluginErrorEvent.class;
     }
 }

@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2010-2014 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -23,21 +25,23 @@ import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
-
 import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.entity.EntityBase;
 import org.killbill.billing.invoice.api.InvoiceItem;
 import org.killbill.billing.invoice.api.InvoiceItemType;
-import org.killbill.billing.entity.EntityBase;
+import org.killbill.billing.util.currency.KillBillMoney;
 
 public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem {
 
     /* Common to all items */
     protected final UUID invoiceId;
     protected final UUID accountId;
+    protected final UUID childAccountId;
     protected final LocalDate startDate;
     protected final LocalDate endDate;
     protected final BigDecimal amount;
     protected final Currency currency;
+    protected final String description;
 
     /* Fixed and recurring specific */
     protected final UUID subscriptionId;
@@ -50,6 +54,9 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
 
     /* RepairAdjInvoiceItem */
     protected final UUID linkedItemId;
+
+    /* Usage specific */
+    protected final String usageName;
 
     @Override
     public String toString() {
@@ -72,39 +79,48 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
     */
     // No rate and no reversing item
     public InvoiceItemBase(final UUID id, @Nullable final DateTime createdDate, final UUID invoiceId, final UUID accountId, @Nullable final UUID bundleId,
-                           @Nullable final UUID subscriptionId, @Nullable final String planName, @Nullable final String phaseName,
+                           @Nullable final UUID subscriptionId, @Nullable final String description, @Nullable final String planName, @Nullable final String phaseName, @Nullable final String usageName,
                            final LocalDate startDate, final LocalDate endDate, final BigDecimal amount, final Currency currency) {
-        this(id, createdDate, invoiceId, accountId, bundleId, subscriptionId, planName, phaseName, startDate, endDate, amount, null, currency, null);
+        this(id, createdDate, invoiceId, accountId, null, bundleId, subscriptionId, description, planName, phaseName, usageName, startDate, endDate, amount, null, currency, null);
     }
 
     // With rate but no reversing item
     public InvoiceItemBase(final UUID id, @Nullable final DateTime createdDate, final UUID invoiceId, final UUID accountId, @Nullable final UUID bundleId,
-                           @Nullable final UUID subscriptionId, @Nullable final String planName, @Nullable final String phaseName,
+                           @Nullable final UUID subscriptionId, @Nullable final String description, @Nullable final String planName, @Nullable final String phaseName, @Nullable final String usageName,
                            final LocalDate startDate, final LocalDate endDate, final BigDecimal amount, final BigDecimal rate, final Currency currency) {
-        this(id, createdDate, invoiceId, accountId, bundleId, subscriptionId, planName, phaseName, startDate, endDate, amount, rate, currency, null);
+        this(id, createdDate, invoiceId, accountId, null, bundleId, subscriptionId, description, planName, phaseName, usageName, startDate, endDate, amount, rate, currency, null);
     }
 
     // With  reversing item, no rate
     public InvoiceItemBase(final UUID id, @Nullable final DateTime createdDate, final UUID invoiceId, final UUID accountId, @Nullable final UUID bundleId,
-                           @Nullable final UUID subscriptionId, @Nullable final String planName, @Nullable final String phaseName,
+                           @Nullable final UUID subscriptionId, @Nullable final String description, @Nullable final String planName, @Nullable final String phaseName, @Nullable final String usageName,
                            final LocalDate startDate, final LocalDate endDate, final BigDecimal amount, final Currency currency, final UUID reversedItemId) {
-        this(id, createdDate, invoiceId, accountId, bundleId, subscriptionId, planName, phaseName, startDate, endDate, amount, null, currency, reversedItemId);
+        this(id, createdDate, invoiceId, accountId, null, bundleId, subscriptionId, description, planName, phaseName, usageName, startDate, endDate, amount, null, currency, reversedItemId);
     }
 
-    private InvoiceItemBase(final UUID id, @Nullable final DateTime createdDate, final UUID invoiceId, final UUID accountId, @Nullable final UUID bundleId,
-                            @Nullable final UUID subscriptionId, @Nullable final String planName, @Nullable final String phaseName,
-                            final LocalDate startDate, final LocalDate endDate, final BigDecimal amount, final BigDecimal rate, final Currency currency,
+    // For parent invoices
+    public InvoiceItemBase(final UUID id, @Nullable final DateTime createdDate, final UUID invoiceId, final UUID accountId, final UUID childAccountId,
+                             final BigDecimal amount, final Currency currency, final String description) {
+        this(id, createdDate, invoiceId, accountId, childAccountId, null, null, description, null, null, null, null, null, amount, null, currency, null);
+    }
+
+    private InvoiceItemBase(final UUID id, @Nullable final DateTime createdDate, final UUID invoiceId, final UUID accountId, @Nullable final UUID childAccountId, @Nullable final UUID bundleId,
+                            @Nullable final UUID subscriptionId, @Nullable final String description, @Nullable final String planName, @Nullable final String phaseName, @Nullable final String usageName,
+                            @Nullable final LocalDate startDate, final LocalDate endDate, final BigDecimal amount, final BigDecimal rate, final Currency currency,
                             final UUID reversedItemId) {
         super(id, createdDate, createdDate);
         this.invoiceId = invoiceId;
         this.accountId = accountId;
+        this.childAccountId = childAccountId;
         this.subscriptionId = subscriptionId;
         this.bundleId = bundleId;
+        this.description = description;
         this.planName = planName;
         this.phaseName = phaseName;
+        this.usageName = usageName;
         this.startDate = startDate;
         this.endDate = endDate;
-        this.amount = amount;
+        this.amount = amount == null || currency == null ? amount : KillBillMoney.of(amount, currency);
         this.currency = currency;
         this.rate = rate;
         this.linkedItemId = reversedItemId;
@@ -170,6 +186,15 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
         return linkedItemId;
     }
 
+    @Override
+    public String getUsageName() {
+        return usageName;
+    }
+
+    @Override
+    public UUID getChildAccountId() {
+        return childAccountId;
+    }
 
     @Override
     public boolean equals(final Object o) {
@@ -187,9 +212,11 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
         if (linkedItemId != null ? !linkedItemId.equals(that.linkedItemId) : that.linkedItemId != null) {
             return false;
         }
+        if (description != null ? !description.equals(that.description) : that.description != null) {
+            return false;
+        }
         return true;
     }
-
 
     @Override
     public boolean matches(final Object o) {
@@ -203,6 +230,9 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
         final InvoiceItemBase that = (InvoiceItemBase) o;
 
         if (accountId != null ? !accountId.equals(that.accountId) : that.accountId != null) {
+            return false;
+        }
+        if (childAccountId != null ? !childAccountId.equals(that.childAccountId) : that.childAccountId != null) {
             return false;
         }
         if (bundleId != null ? !bundleId.equals(that.bundleId) : that.bundleId != null) {
@@ -235,18 +265,19 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
         return true;
     }
 
-
     @Override
     public int hashCode() {
         int result = super.hashCode();
         result = 31 * result + (invoiceId != null ? invoiceId.hashCode() : 0);
         result = 31 * result + (accountId != null ? accountId.hashCode() : 0);
+        result = 31 * result + (childAccountId != null ? childAccountId.hashCode() : 0);
         result = 31 * result + (startDate != null ? startDate.hashCode() : 0);
         result = 31 * result + (endDate != null ? endDate.hashCode() : 0);
         result = 31 * result + (amount != null ? amount.hashCode() : 0);
         result = 31 * result + (currency != null ? currency.hashCode() : 0);
         result = 31 * result + (subscriptionId != null ? subscriptionId.hashCode() : 0);
         result = 31 * result + (bundleId != null ? bundleId.hashCode() : 0);
+        result = 31 * result + (description != null ? description.hashCode() : 0);
         result = 31 * result + (planName != null ? planName.hashCode() : 0);
         result = 31 * result + (phaseName != null ? phaseName.hashCode() : 0);
         result = 31 * result + (rate != null ? rate.hashCode() : 0);
@@ -259,5 +290,4 @@ public abstract class InvoiceItemBase extends EntityBase implements InvoiceItem 
 
     @Override
     public abstract String getDescription();
-
 }

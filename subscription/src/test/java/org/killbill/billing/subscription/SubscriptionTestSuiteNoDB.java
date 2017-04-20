@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,20 +18,23 @@
 
 package org.killbill.billing.subscription;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
+import java.util.UUID;
 
 import javax.inject.Inject;
 
 import org.killbill.billing.GuicyKillbillTestSuiteNoDB;
-import org.killbill.billing.TestKillbillConfigSource;
 import org.killbill.billing.account.api.AccountData;
+import org.killbill.billing.account.api.ImmutableAccountData;
+import org.killbill.billing.account.api.ImmutableAccountInternalApi;
 import org.killbill.billing.api.TestApiListener;
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogService;
+import org.killbill.billing.dao.MockNonEntityDao;
+import org.killbill.billing.lifecycle.api.BusService;
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.SubscriptionBaseService;
-import org.killbill.billing.subscription.api.migration.SubscriptionBaseMigrationApi;
 import org.killbill.billing.subscription.api.timeline.SubscriptionBaseTimelineApi;
 import org.killbill.billing.subscription.api.transfer.SubscriptionBaseTransferApi;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
@@ -37,9 +42,9 @@ import org.killbill.billing.subscription.api.user.TestSubscriptionHelper;
 import org.killbill.billing.subscription.engine.dao.MockSubscriptionDaoMemory;
 import org.killbill.billing.subscription.engine.dao.SubscriptionDao;
 import org.killbill.billing.subscription.glue.TestDefaultSubscriptionModuleNoDB;
-import org.killbill.billing.util.KillbillConfigSource;
-import org.killbill.billing.util.config.SubscriptionConfig;
-import org.killbill.billing.util.svcsapi.bus.BusService;
+import org.killbill.billing.util.cache.CacheControllerDispatcher;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.config.definition.SubscriptionConfig;
 import org.killbill.clock.ClockMock;
 import org.mockito.Mockito;
 import org.skife.jdbi.v2.IDBI;
@@ -53,11 +58,14 @@ import org.testng.annotations.BeforeMethod;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Stage;
+import org.killbill.billing.util.UUIDs;
 
 public class SubscriptionTestSuiteNoDB extends GuicyKillbillTestSuiteNoDB {
 
     protected static final Logger log = LoggerFactory.getLogger(SubscriptionTestSuiteNoDB.class);
 
+    @Inject
+    protected ImmutableAccountInternalApi immutableAccountInternalApi;
     @Inject
     protected SubscriptionBaseService subscriptionBaseService;
     @Inject
@@ -65,8 +73,6 @@ public class SubscriptionTestSuiteNoDB extends GuicyKillbillTestSuiteNoDB {
     @Inject
     protected SubscriptionBaseTransferApi transferApi;
 
-    @Inject
-    protected SubscriptionBaseMigrationApi migrationApi;
     @Inject
     protected SubscriptionBaseTimelineApi repairApi;
 
@@ -92,13 +98,22 @@ public class SubscriptionTestSuiteNoDB extends GuicyKillbillTestSuiteNoDB {
     @Inject
     protected SubscriptionTestInitializer subscriptionTestInitializer;
 
+    @Inject
+    protected CacheControllerDispatcher cacheControllerDispatcher;
+
+    @Inject
+    protected MockNonEntityDao mockNonEntityDao;
+
+    @Inject
+    protected InternalCallContextFactory internalCallContextFactory;
+
     protected Catalog catalog;
     protected AccountData accountData;
     protected SubscriptionBaseBundle bundle;
 
     @Override
-    protected KillbillConfigSource getConfigSource() throws IOException, URISyntaxException {
-        return new TestKillbillConfigSource("/subscription.properties");
+    protected KillbillConfigSource getConfigSource() {
+        return getConfigSource("/subscription.properties");
     }
 
     @BeforeClass(groups = "fast")
@@ -116,11 +131,19 @@ public class SubscriptionTestSuiteNoDB extends GuicyKillbillTestSuiteNoDB {
         // CLEANUP ALL DB TABLES OR IN MEMORY STRUCTURES
         ((MockSubscriptionDaoMemory) dao).reset();
 
-        subscriptionTestInitializer.startTestFamework(testListener, clock, busService, subscriptionBaseService);
+        subscriptionTestInitializer.startTestFramework(testListener, clock, busService, subscriptionBaseService);
 
-        this.catalog = subscriptionTestInitializer.initCatalog(catalogService);
+        this.catalog = subscriptionTestInitializer.initCatalog(catalogService, internalCallContext);
         this.accountData = subscriptionTestInitializer.initAccountData();
-        this.bundle = subscriptionTestInitializer.initBundle(subscriptionInternalApi, internalCallContext);
+        final UUID accountId = UUIDs.randomUUID();
+        mockNonEntityDao.addTenantRecordIdMapping(accountId, internalCallContext);
+
+        final ImmutableAccountData immutableAccountData = Mockito.mock(ImmutableAccountData.class);
+        Mockito.when(immutableAccountInternalApi.getImmutableAccountDataByRecordId(Mockito.<Long>eq(internalCallContext.getAccountRecordId()), Mockito.<InternalTenantContext>any())).thenReturn(immutableAccountData);
+
+        this.bundle = subscriptionTestInitializer.initBundle(accountId, subscriptionInternalApi, internalCallContext);
+        mockNonEntityDao.addTenantRecordIdMapping(bundle.getId(), internalCallContext);
+        mockNonEntityDao.addAccountRecordIdMapping(bundle.getId(), internalCallContext);
     }
 
     @AfterMethod(groups = "fast")

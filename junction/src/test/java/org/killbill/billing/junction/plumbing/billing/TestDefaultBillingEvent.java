@@ -45,7 +45,6 @@ import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.junction.JunctionTestSuiteNoDB;
 import org.killbill.billing.mock.MockAccountBuilder;
 import org.killbill.billing.junction.BillingEvent;
-import org.killbill.billing.junction.BillingModeType;
 
 public class TestDefaultBillingEvent extends JunctionTestSuiteNoDB {
 
@@ -137,7 +136,7 @@ public class TestDefaultBillingEvent extends JunctionTestSuiteNoDB {
     public void testEventTotalOrdering() {
         final BillingEvent event0 = createEvent(subscription(ID_ZERO), new DateTime("2012-01-01T00:02:04.000Z"), SubscriptionBaseTransitionType.CREATE, 1L);
         final BillingEvent event1 = createEvent(subscription(ID_ZERO), new DateTime("2012-01-01T00:02:04.000Z"), SubscriptionBaseTransitionType.CANCEL, 2L);
-        final BillingEvent event2 = createEvent(subscription(ID_ZERO), new DateTime("2012-01-01T00:02:04.000Z"), SubscriptionBaseTransitionType.RE_CREATE, 3L);
+        final BillingEvent event2 = createEvent(subscription(ID_ZERO), new DateTime("2012-01-01T00:02:04.000Z"), SubscriptionBaseTransitionType.CANCEL, 3L);
 
         final SortedSet<BillingEvent> set = new TreeSet<BillingEvent>();
         set.add(event2);
@@ -173,7 +172,7 @@ public class TestDefaultBillingEvent extends JunctionTestSuiteNoDB {
     public void testToString() throws Exception {
         // Simple test to ensure we have an easy to read toString representation
         final BillingEvent event = createEvent(subscription(ID_ZERO), new DateTime("2012-01-01T00:02:04.000Z", DateTimeZone.UTC), SubscriptionBaseTransitionType.CREATE);
-        Assert.assertEquals(event.toString(), "DefaultBillingEvent{type=CREATE, effectiveDate=2012-01-01T00:02:04.000Z, planPhaseName=Test-trial, subscriptionId=00000000-0000-0000-0000-000000000000, totalOrdering=1, accountId=" + event.getAccount().getId().toString() + "}");
+        Assert.assertEquals(event.toString(), "DefaultBillingEvent{type=CREATE, effectiveDate=2012-01-01T00:02:04.000Z, planPhaseName=Test-trial, subscriptionId=00000000-0000-0000-0000-000000000000, totalOrdering=1}");
     }
 
     private BillingEvent createEvent(final SubscriptionBase sub, final DateTime effectiveDate, final SubscriptionBaseTransitionType type) {
@@ -187,10 +186,10 @@ public class TestDefaultBillingEvent extends JunctionTestSuiteNoDB {
         final PlanPhase shotgunMonthly = createMockMonthlyPlanPhase(null, BigDecimal.ZERO, PhaseType.TRIAL);
 
         final Account account = new MockAccountBuilder().build();
-        return new DefaultBillingEvent(account, sub, effectiveDate,
-                                       shotgun, shotgunMonthly,
-                                       BigDecimal.ZERO, null, Currency.USD, BillingPeriod.NO_BILLING_PERIOD, billCycleDay,
-                                       BillingModeType.IN_ADVANCE, "Test Event 1", totalOrdering, type, DateTimeZone.UTC);
+        return new DefaultBillingEvent(sub, effectiveDate, true,
+                                       shotgun, shotgunMonthly, BigDecimal.ZERO,
+                                       Currency.USD, BillingPeriod.NO_BILLING_PERIOD, billCycleDay,
+                                       "Test Event 1", totalOrdering, type, DateTimeZone.UTC, null, false);
     }
 
     private MockPlanPhase createMockMonthlyPlanPhase(@Nullable final BigDecimal recurringRate,

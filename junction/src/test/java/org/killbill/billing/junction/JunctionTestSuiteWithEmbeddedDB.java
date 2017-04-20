@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,14 +18,13 @@
 
 package org.killbill.billing.junction;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.killbill.billing.GuicyKillbillTestSuiteWithEmbeddedDB;
-import org.killbill.billing.TestKillbillConfigSource;
+import org.killbill.billing.account.api.Account;
+import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.account.api.AccountData;
 import org.killbill.billing.account.api.AccountUserApi;
 import org.killbill.billing.api.TestApiListener;
@@ -35,13 +36,14 @@ import org.killbill.billing.entitlement.DefaultEntitlementService;
 import org.killbill.billing.entitlement.EntitlementService;
 import org.killbill.billing.entitlement.api.EntitlementApi;
 import org.killbill.billing.junction.glue.TestJunctionModuleWithEmbeddedDB;
+import org.killbill.billing.lifecycle.api.BusService;
 import org.killbill.billing.mock.MockAccountBuilder;
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.SubscriptionBaseService;
 import org.killbill.billing.subscription.engine.core.DefaultSubscriptionBaseService;
-import org.killbill.billing.util.KillbillConfigSource;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
-import org.killbill.billing.util.svcsapi.bus.BusService;
+import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.bus.api.PersistentBus;
 import org.killbill.clock.ClockMock;
 import org.slf4j.Logger;
@@ -84,13 +86,15 @@ public abstract class JunctionTestSuiteWithEmbeddedDB extends GuicyKillbillTestS
     @Inject
     protected EntitlementService entitlementService;
     @Inject
+    protected NonEntityDao nonEntityDao;
+    @Inject
     protected InternalCallContextFactory internalCallContextFactory;
 
     protected Catalog catalog;
 
     @Override
-    protected KillbillConfigSource getConfigSource() throws IOException, URISyntaxException {
-        return new TestKillbillConfigSource("/junction.properties");
+    protected KillbillConfigSource getConfigSource() {
+        return getConfigSource("/junction.properties");
     }
 
     @BeforeClass(groups = "slow")
@@ -119,7 +123,7 @@ public abstract class JunctionTestSuiteWithEmbeddedDB extends GuicyKillbillTestS
 
     private Catalog initCatalog(final CatalogService catalogService) throws Exception {
         ((DefaultCatalogService) catalogService).loadCatalog();
-        final Catalog catalog = catalogService.getFullCatalog();
+        final Catalog catalog = catalogService.getFullCatalog(true, true, internalCallContext);
         assertNotNull(catalog);
         return catalog;
     }
@@ -205,6 +209,14 @@ public abstract class JunctionTestSuiteWithEmbeddedDB extends GuicyKillbillTestS
                                        .paymentMethodId(UUID.randomUUID())
                                        .timeZone(DateTimeZone.UTC)
                                        .build();
+    }
+
+    protected Account createAccount(final AccountData accountData) throws AccountApiException {
+        final Account account = accountApi.createAccount(accountData, callContext);
+
+        refreshCallContext(account.getId());
+
+        return account;
     }
 
     protected void assertListenerStatus() {

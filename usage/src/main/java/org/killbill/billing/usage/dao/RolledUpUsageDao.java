@@ -16,18 +16,22 @@
 
 package org.killbill.billing.usage.dao;
 
-import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
-import org.joda.time.DateTime;
-
+import org.joda.time.LocalDate;
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
 
 public interface RolledUpUsageDao {
 
-    void record(UUID subscriptionId, String unitType, DateTime startTime,
-                DateTime endTime, BigDecimal amount, InternalCallContext context);
+    void record(Iterable<RolledUpUsageModelDao> usages, InternalCallContext context);
 
-    RolledUpUsageModelDao getUsageForSubscription(UUID subscriptionId, InternalTenantContext context);
+    Boolean recordsWithTrackingIdExist(UUID subscriptionId, String trackingId, InternalTenantContext context);
+
+    List<RolledUpUsageModelDao> getUsageForSubscription(UUID subscriptionId, LocalDate startDate, LocalDate endDate, String unitType, InternalTenantContext context);
+
+    List<RolledUpUsageModelDao> getAllUsageForSubscription(UUID subscriptionId, LocalDate startDate, LocalDate endDate, InternalTenantContext context);
+
+    List<RolledUpUsageModelDao> getRawUsageForAccount(LocalDate startDate, LocalDate endDate, InternalTenantContext context);
 }

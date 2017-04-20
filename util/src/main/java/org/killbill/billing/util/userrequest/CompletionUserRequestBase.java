@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -23,9 +25,12 @@ import java.util.concurrent.TimeoutException;
 
 import org.killbill.billing.events.AccountChangeInternalEvent;
 import org.killbill.billing.events.AccountCreationInternalEvent;
+import org.killbill.billing.events.BlockingTransitionInternalEvent;
 import org.killbill.billing.events.BusInternalEvent;
 import org.killbill.billing.events.EffectiveSubscriptionInternalEvent;
 import org.killbill.billing.events.InvoiceCreationInternalEvent;
+import org.killbill.billing.events.InvoicePaymentErrorInternalEvent;
+import org.killbill.billing.events.InvoicePaymentInfoInternalEvent;
 import org.killbill.billing.events.NullInvoiceInternalEvent;
 import org.killbill.billing.events.PaymentErrorInternalEvent;
 import org.killbill.billing.events.PaymentInfoInternalEvent;
@@ -42,7 +47,6 @@ public class CompletionUserRequestBase implements CompletionUserRequest {
 
     private boolean isCompleted;
     private long initialTimeMilliSec;
-
 
     public CompletionUserRequestBase(final UUID userToken) {
         this.events = new LinkedList<BusInternalEvent>();
@@ -79,7 +83,6 @@ public class CompletionUserRequestBase implements CompletionUserRequest {
         }
     }
 
-
     private long currentTimeMillis() {
         return System.nanoTime() / NANO_TO_MILLI_SEC;
     }
@@ -105,6 +108,9 @@ public class CompletionUserRequestBase implements CompletionUserRequest {
             case ACCOUNT_CHANGE:
                 onAccountChange((AccountChangeInternalEvent) curEvent);
                 break;
+            case BLOCKING_STATE:
+                onBlockingState((BlockingTransitionInternalEvent) curEvent);
+                break;
             case SUBSCRIPTION_TRANSITION:
                 // We only dispatch the event for the effective date and not the requested date since we have both
                 // for subscription events.
@@ -127,11 +133,16 @@ public class CompletionUserRequestBase implements CompletionUserRequest {
             case PAYMENT_PLUGIN_ERROR:
                 onPaymentPluginError((PaymentPluginErrorInternalEvent) curEvent);
                 break;
+            case INVOICE_PAYMENT_INFO:
+                onInvoicePaymentInfo((InvoicePaymentInfoInternalEvent) curEvent);
+                break;
+            case INVOICE_PAYMENT_ERROR:
+                onInvoicePaymentError((InvoicePaymentErrorInternalEvent) curEvent);
+                break;
             default:
                 throw new RuntimeException("Unexpected event type " + curEvent.getBusEventType());
         }
     }
-
 
     @Override
     public void onAccountCreation(final AccountCreationInternalEvent curEvent) {
@@ -143,6 +154,11 @@ public class CompletionUserRequestBase implements CompletionUserRequest {
 
     @Override
     public void onSubscriptionBaseTransition(final EffectiveSubscriptionInternalEvent curEventEffective) {
+    }
+
+    @Override
+    public void onBlockingState(final BlockingTransitionInternalEvent curEvent) {
+
     }
 
     @Override
@@ -163,5 +179,13 @@ public class CompletionUserRequestBase implements CompletionUserRequest {
 
     @Override
     public void onPaymentPluginError(final PaymentPluginErrorInternalEvent curEvent) {
+    }
+
+    @Override
+    public void onInvoicePaymentInfo(final InvoicePaymentInfoInternalEvent curEvent) {
+    }
+
+    @Override
+    public void onInvoicePaymentError(final InvoicePaymentErrorInternalEvent curEvent) {
     }
 }

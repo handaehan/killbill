@@ -17,13 +17,9 @@
 package org.killbill.billing.invoice.api.invoice;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-
-import org.testng.Assert;
-import org.testng.annotations.Test;
 
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.invoice.InvoiceTestSuiteWithEmbeddedDB;
@@ -31,12 +27,14 @@ import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
 import org.killbill.billing.invoice.api.InvoicePayment;
 import org.killbill.billing.invoice.api.InvoicePaymentType;
+import org.testng.Assert;
+import org.testng.annotations.Test;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
-import static org.killbill.billing.invoice.tests.InvoiceTestUtils.createAndPersistInvoice;
-import static org.killbill.billing.invoice.tests.InvoiceTestUtils.createAndPersistPayment;
+import static org.killbill.billing.invoice.proRations.InvoiceTestUtils.createAndPersistInvoice;
+import static org.killbill.billing.invoice.proRations.InvoiceTestUtils.createAndPersistPayment;
 
 public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB {
 
@@ -53,20 +51,11 @@ public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB
         verifyRefund(THIRTY, BigDecimal.TEN, BigDecimal.TEN, false, ImmutableMap.<UUID, BigDecimal>of());
     }
 
-    @Test(groups = "slow")
-    public void testFullRefundWithInvoiceAdjustment() throws Exception {
-        verifyRefund(THIRTY, THIRTY, BigDecimal.ZERO, true, ImmutableMap.<UUID, BigDecimal>of());
-    }
-
-    @Test(groups = "slow")
-    public void testPartialRefundWithInvoiceAdjustment() throws Exception {
-        verifyRefund(THIRTY, BigDecimal.TEN, BigDecimal.ZERO, true, ImmutableMap.<UUID, BigDecimal>of());
-    }
 
     @Test(groups = "slow")
     public void testFullRefundWithBothInvoiceItemAdjustments() throws Exception {
         // Create an invoice with two items (30 \u20ac and 10 \u20ac)
-        final Invoice invoice = createAndPersistInvoice(invoiceDao, clock,
+        final Invoice invoice = createAndPersistInvoice(invoiceUtil, invoiceDao, clock,
                                                         ImmutableList.<BigDecimal>of(THIRTY, BigDecimal.TEN), CURRENCY, internalCallContext);
 
         // Fully adjust both items
@@ -80,7 +69,7 @@ public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB
     @Test(groups = "slow")
     public void testPartialRefundWithSingleInvoiceItemAdjustment() throws Exception {
         // Create an invoice with two items (30 \u20ac and 10 \u20ac)
-        final Invoice invoice = createAndPersistInvoice(invoiceDao, clock,
+        final Invoice invoice = createAndPersistInvoice(invoiceUtil, invoiceDao, clock,
                                                         ImmutableList.<BigDecimal>of(THIRTY, BigDecimal.TEN), CURRENCY, internalCallContext);
 
         // Fully adjust both items
@@ -93,7 +82,7 @@ public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB
     @Test(groups = "slow")
     public void testPartialRefundWithTwoInvoiceItemAdjustment() throws Exception {
         // Create an invoice with two items (30 \u20ac and 10 \u20ac)
-        final Invoice invoice = createAndPersistInvoice(invoiceDao, clock,
+        final Invoice invoice = createAndPersistInvoice(invoiceUtil, invoiceDao, clock,
                                                         ImmutableList.<BigDecimal>of(THIRTY, BigDecimal.TEN), CURRENCY, internalCallContext);
         // Adjust partially both items: the invoice posted was 40 \u20ac, but we should really just have charged you 2 \u20ac
         final ImmutableMap<UUID, BigDecimal> adjustments = ImmutableMap.<UUID, BigDecimal>of(invoice.getInvoiceItems().get(0).getId(), new BigDecimal("29"),
@@ -103,7 +92,7 @@ public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB
 
     private void verifyRefund(final BigDecimal invoiceAmount, final BigDecimal refundAmount, final BigDecimal finalInvoiceAmount,
                               final boolean adjusted, final Map<UUID, BigDecimal> invoiceItemIdsWithAmounts) throws InvoiceApiException {
-        final Invoice invoice = createAndPersistInvoice(invoiceDao, clock, invoiceAmount, CURRENCY, internalCallContext);
+        final Invoice invoice = createAndPersistInvoice(invoiceUtil, invoiceDao, clock, invoiceAmount, CURRENCY, internalCallContext);
         verifyRefund(invoice, invoiceAmount, refundAmount, finalInvoiceAmount, adjusted, invoiceItemIdsWithAmounts);
     }
 
@@ -112,12 +101,12 @@ public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB
         final InvoicePayment payment = createAndPersistPayment(invoiceInternalApi, clock, invoice.getId(), invoiceAmount, CURRENCY, internalCallContext);
 
         // Verify the initial invoice balance
-        final BigDecimal initialInvoiceBalance = invoicePaymentApi.getInvoice(invoice.getId(), callContext).getBalance();
+        final BigDecimal initialInvoiceBalance = invoiceInternalApi.getInvoiceById(invoice.getId(), internalCallContext).getBalance();
         Assert.assertEquals(initialInvoiceBalance.compareTo(BigDecimal.ZERO), 0);
 
         // Create a full refund with no adjustment
-        final InvoicePayment refund = invoiceInternalApi.createRefund(payment.getPaymentId(), refundAmount, adjusted, invoiceItemIdsWithAmounts,
-                                                                      UUID.randomUUID(), internalCallContext);
+        final InvoicePayment refund = invoiceInternalApi.recordRefund(payment.getPaymentId(), refundAmount, adjusted, invoiceItemIdsWithAmounts,
+                                                                      UUID.randomUUID().toString(), internalCallContext);
         Assert.assertEquals(refund.getAmount().compareTo(refundAmount.negate()), 0);
         Assert.assertEquals(refund.getCurrency(), CURRENCY);
         Assert.assertEquals(refund.getInvoiceId(), invoice.getId());
@@ -125,7 +114,7 @@ public class TestDefaultInvoicePaymentApi extends InvoiceTestSuiteWithEmbeddedDB
         Assert.assertEquals(refund.getType(), InvoicePaymentType.REFUND);
 
         // Verify the current invoice balance
-        final BigDecimal newInvoiceBalance = invoicePaymentApi.getInvoice(invoice.getId(), callContext).getBalance();
+        final BigDecimal newInvoiceBalance = invoiceInternalApi.getInvoiceById(invoice.getId(), internalCallContext).getBalance();
         Assert.assertEquals(newInvoiceBalance.compareTo(finalInvoiceAmount), 0);
     }
 }

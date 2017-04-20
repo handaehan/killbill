@@ -16,13 +16,12 @@ order by <prefix>effective_date ASC, <recordIdField(prefix)> ASC
 tableFields(prefix) ::= <<
   <prefix> event_type
 , <prefix> user_type
-, <prefix> requested_date
 , <prefix> effective_date
 , <prefix> subscription_id
 , <prefix> plan_name
 , <prefix> phase_name
 , <prefix> price_list_name
-, <prefix> current_version
+, <prefix> billing_cycle_day_local
 , <prefix> is_active
 , <prefix> created_by
 , <prefix> created_date
@@ -33,13 +32,12 @@ tableFields(prefix) ::= <<
 tableValues() ::= <<
   :eventType
 , :userType
-, :requestedDate
 , :effectiveDate
 , :subscriptionId
 , :planName
 , :phaseName
 , :priceListName
-, :currentVersion
+, :billingCycleDayLocal
 , :isActive
 , :createdBy
 , :createdDate
@@ -47,44 +45,17 @@ tableValues() ::= <<
 , :updatedDate
 >>
 
-
-updateVersion() ::= <<
-update <tableName()>
-set
-current_version = :currentVersion
-, updated_by = :createdBy
-, updated_date = :createdDate
-where
-id = :id
-<AND_CHECK_TENANT()>
-;
->>
-
 unactiveEvent() ::= <<
 update <tableName()>
 set
-is_active = 0
+is_active = false
 , updated_by = :createdBy
-, updated_date = :createdDate
+, updated_date = :updatedDate
 where
 id = :id
 <AND_CHECK_TENANT()>
 ;
 >>
-
-reactiveEvent() ::= <<
-update <tableName()>
-set
-is_active = 1
-, updated_by = :createdBy
-, updated_date = :createdDate
-where
-event_id = :eventId
-<AND_CHECK_TENANT()>
-;
->>
-
-
 
 getFutureActiveEventForSubscription() ::= <<
 select <allTableFields()>
@@ -92,12 +63,26 @@ select <allTableFields()>
 from <tableName()>
 where
 subscription_id = :subscriptionId
-and is_active = 1
+and is_active = true
 and effective_date > :now
 <AND_CHECK_TENANT()>
 <defaultOrderBy()>
 ;
->> 
+>>
+
+
+getFutureOrPresentActiveEventForSubscription() ::= <<
+select <allTableFields()>
+, record_id as total_ordering
+from <tableName()>
+where
+subscription_id = :subscriptionId
+and is_active = true
+and effective_date >= :now
+<AND_CHECK_TENANT()>
+<defaultOrderBy()>
+;
+>>
 
 getEventsForSubscription() ::= <<
 select <allTableFields()>
@@ -105,9 +90,23 @@ select <allTableFields()>
 from <tableName()>
 where
 subscription_id = :subscriptionId
-and is_active = 1
+and is_active = true
 <AND_CHECK_TENANT()>
 <defaultOrderBy()>
 ;
 >>
+
+getFutureActiveEventsForAccount() ::= <<
+select <allTableFields()>
+, record_id as total_ordering
+from <tableName()>
+where
+account_record_id = :accountRecordId
+and is_active = true
+and effective_date > :now
+<AND_CHECK_TENANT()>
+<defaultOrderBy()>
+;
+>>
+
 

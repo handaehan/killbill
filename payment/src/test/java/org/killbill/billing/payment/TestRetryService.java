@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,6 +19,7 @@
 package org.killbill.billing.payment;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -25,21 +28,28 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 
 import org.joda.time.LocalDate;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
-
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.payment.api.Payment;
-import org.killbill.billing.payment.api.PaymentAttempt;
 import org.killbill.billing.payment.api.PaymentApiException;
-import org.killbill.billing.payment.api.PaymentStatus;
-import org.killbill.billing.payment.glue.DefaultPaymentService;
+import org.killbill.billing.payment.api.PluginProperty;
+import org.killbill.billing.payment.dao.PaymentAttemptModelDao;
+import org.killbill.billing.payment.dao.PaymentTransactionModelDao;
+import org.killbill.billing.payment.invoice.InvoicePaymentControlPluginApi;
 import org.killbill.billing.payment.provider.MockPaymentProviderPlugin;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
+import com.google.common.base.Predicate;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.jayway.awaitility.Awaitility;
+import com.jayway.awaitility.Duration;
 
 import static com.jayway.awaitility.Awaitility.await;
+import static com.jayway.awaitility.Awaitility.setDefaultPollInterval;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
@@ -47,20 +57,22 @@ import static org.testng.Assert.fail;
 
 public class TestRetryService extends PaymentTestSuiteNoDB {
 
+    private static final int TIMEOUT = 10;
+
     private MockPaymentProviderPlugin mockPaymentProviderPlugin;
 
     @Override
     @BeforeMethod(groups = "fast")
     public void beforeMethod() throws Exception {
         super.beforeMethod();
-        pluginRetryService.initialize(DefaultPaymentService.SERVICE_NAME);
-        pluginRetryService.start();
 
-        retryService.initialize(DefaultPaymentService.SERVICE_NAME);
-        retryService.start();
+        setDefaultPollInterval(Duration.ONE_HUNDRED_MILLISECONDS);
+        Awaitility.setDefaultPollDelay(Duration.SAME_AS_POLL_INTERVAL);
 
         mockPaymentProviderPlugin = (MockPaymentProviderPlugin) registry.getServiceForName(MockPaymentProviderPlugin.PLUGIN_NAME);
         mockPaymentProviderPlugin.clear();
+        retryService.initialize();
+        retryService.start();
     }
 
     @Override
@@ -68,51 +80,19 @@ public class TestRetryService extends PaymentTestSuiteNoDB {
     public void afterMethod() throws Exception {
         super.afterMethod();
         retryService.stop();
-        pluginRetryService.stop();
     }
 
-    private Payment getPaymentForInvoice(final UUID invoiceId) throws PaymentApiException {
-        final List<Payment> payments = paymentProcessor.getInvoicePayments(invoiceId, internalCallContext);
-        assertEquals(payments.size(), 1);
-        final Payment payment = payments.get(0);
-        assertEquals(payment.getInvoiceId(), invoiceId);
+    private Payment getPaymentForExternalKey(final String externalKey) throws PaymentApiException {
+        final Payment payment = paymentProcessor.getPaymentByExternalKey(externalKey, false, false, ImmutableList.<PluginProperty>of(), callContext, internalCallContext);
         return payment;
     }
 
-    @Test(groups = "fast")
-    public void testFailedPluginWithOneSuccessfulRetry() throws Exception {
-        testSchedulesRetryInternal(1, FailureType.PLUGIN_EXCEPTION);
-    }
-
-    @Test(groups = "fast")
-    public void testFailedPpluginWithLastRetrySuccess() throws Exception {
-        testSchedulesRetryInternal(paymentConfig.getPluginFailureRetryMaxAttempts(), FailureType.PLUGIN_EXCEPTION);
-    }
-
+    // PLUGIN_EXCEPTION will lead to UNKNOWN row that will not be retried by the plugin
     @Test(groups = "fast")
     public void testAbortedPlugin() throws Exception {
-        testSchedulesRetryInternal(paymentConfig.getPluginFailureRetryMaxAttempts() + 1, FailureType.PLUGIN_EXCEPTION);
-    }
-
-    @Test(groups = "fast")
-    public void testFailedPaymentWithOneSuccessfulRetry() throws Exception {
-        testSchedulesRetryInternal(1, FailureType.PAYMENT_FAILURE);
-    }
-
-    @Test(groups = "fast")
-    public void testFailedPaymentWithLastRetrySuccess() throws Exception {
-        testSchedulesRetryInternal(paymentConfig.getPaymentRetryDays().size(), FailureType.PAYMENT_FAILURE);
-    }
-
-    @Test(groups = "fast")
-    public void testAbortedPayment() throws Exception {
-        testSchedulesRetryInternal(paymentConfig.getPaymentRetryDays().size() + 1, FailureType.PAYMENT_FAILURE);
-    }
-
-    private void testSchedulesRetryInternal(final int maxTries, final FailureType failureType) throws Exception {
 
         final Account account = testHelper.createTestAccount("yiyi.gmail.com", true);
-        final Invoice invoice = testHelper.createTestInvoice(account, clock.getUTCToday(), Currency.USD, callContext);
+        final Invoice invoice = testHelper.createTestInvoice(account, clock.getUTCToday(), Currency.USD);
         final BigDecimal amount = new BigDecimal("10.00");
         final UUID subscriptionId = UUID.randomUUID();
         final UUID bundleId = UUID.randomUUID();
@@ -123,84 +103,284 @@ public class TestRetryService extends PaymentTestSuiteNoDB {
                                                             account.getId(),
                                                             subscriptionId,
                                                             bundleId,
-                                                            "test plan", "test phase",
+                                                            "test plan", "test phase", null,
                                                             startDate,
                                                             endDate,
                                                             amount,
                                                             new BigDecimal("1.0"),
                                                             Currency.USD));
-        setPaymentFailure(failureType);
+        setPaymentFailure(FailureType.PLUGIN_EXCEPTION);
+
         boolean failed = false;
+        final String paymentExternalKey = UUID.randomUUID().toString();
+        final String transactionExternalKey = UUID.randomUUID().toString();
         try {
-            paymentProcessor.createPayment(account, invoice.getId(), amount, internalCallContext, false, false);
-        } catch (PaymentApiException e) {
+            pluginControlPaymentProcessor.createPurchase(false, account, account.getPaymentMethodId(), null, amount, Currency.USD, paymentExternalKey, transactionExternalKey,
+                                                         createPropertiesForInvoice(invoice), ImmutableList.<String>of(InvoicePaymentControlPluginApi.PLUGIN_NAME), callContext, internalCallContext);
+        } catch (final PaymentApiException e) {
             failed = true;
         }
         assertTrue(failed);
 
-        for (int curFailure = 0; curFailure < maxTries; curFailure++) {
+        Payment payment = getPaymentForExternalKey(paymentExternalKey);
+        List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+        assertEquals(attempts.size(), 1);
 
-            if (curFailure < maxTries - 1) {
-                setPaymentFailure(failureType);
-            }
+        final List<PaymentTransactionModelDao> transactions = paymentDao.getTransactionsForPayment(payment.getId(), internalCallContext);
+        assertEquals(transactions.size(), 1);
 
-            if (curFailure < getMaxRetrySizeForFailureType(failureType)) {
-
-                moveClockForFailureType(failureType, curFailure);
-                try {
-                    await().atMost(3, SECONDS).until(new Callable<Boolean>() {
-                        @Override
-                        public Boolean call() throws Exception {
-                            final Payment payment = getPaymentForInvoice(invoice.getId());
-                            return payment.getPaymentStatus() == PaymentStatus.SUCCESS;
-                        }
-                    });
-                } catch (TimeoutException e) {
-                    if (curFailure == maxTries - 1) {
-                        fail("Failed to find successful payment for attempt " + (curFailure + 1) + "/" + maxTries);
-                    }
-                }
-            }
-        }
-        final Payment payment = getPaymentForInvoice(invoice.getId());
-        final List<PaymentAttempt> attempts = payment.getAttempts();
-
-        final int expectedAttempts = maxTries < getMaxRetrySizeForFailureType(failureType) ?
-                maxTries + 1 : getMaxRetrySizeForFailureType(failureType) + 1;
+        attempts = paymentDao.getPaymentAttempts(payment.getExternalKey(), internalCallContext);
+        final int expectedAttempts = 1;
         assertEquals(attempts.size(), expectedAttempts);
-        Collections.sort(attempts, new Comparator<PaymentAttempt>() {
+        assertEquals(attempts.get(0).getStateName(), "ABORTED");
+    }
+
+    @Test(groups = "fast")
+    public void testFailedPaymentWithOneSuccessfulRetry() throws Exception {
+
+        final Account account = testHelper.createTestAccount("yiyi.gmail.com", true);
+        final Invoice invoice = testHelper.createTestInvoice(account, clock.getUTCToday(), Currency.USD);
+        final BigDecimal amount = new BigDecimal("10.00");
+        final UUID subscriptionId = UUID.randomUUID();
+        final UUID bundleId = UUID.randomUUID();
+
+        final LocalDate startDate = clock.getUTCToday();
+        final LocalDate endDate = startDate.plusMonths(1);
+        invoice.addInvoiceItem(new MockRecurringInvoiceItem(invoice.getId(),
+                                                            account.getId(),
+                                                            subscriptionId,
+                                                            bundleId,
+                                                            "test plan", "test phase", null,
+                                                            startDate,
+                                                            endDate,
+                                                            amount,
+                                                            new BigDecimal("1.0"),
+                                                            Currency.USD));
+        setPaymentFailure(FailureType.PAYMENT_FAILURE);
+
+        final String paymentExternalKey = UUID.randomUUID().toString();
+        final String transactionExternalKey = UUID.randomUUID().toString();
+        pluginControlPaymentProcessor.createPurchase(false, account, account.getPaymentMethodId(), null, amount, Currency.USD, paymentExternalKey, transactionExternalKey,
+                                                     createPropertiesForInvoice(invoice), ImmutableList.<String>of(InvoicePaymentControlPluginApi.PLUGIN_NAME), callContext, internalCallContext);
+
+        Payment payment = getPaymentForExternalKey(paymentExternalKey);
+        List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+        assertEquals(attempts.size(), 1);
+
+        final List<PaymentTransactionModelDao> transactions = paymentDao.getTransactionsForPayment(payment.getId(), internalCallContext);
+        assertEquals(transactions.size(), 1);
+
+        moveClockForFailureType(FailureType.PAYMENT_FAILURE, 0);
+
+        try {
+            await().atMost(TIMEOUT, SECONDS).until(new Callable<Boolean>() {
+                @Override
+                public Boolean call() throws Exception {
+                    final List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+                    final List<PaymentAttemptModelDao> filteredAttempts = ImmutableList.copyOf(Iterables.filter(attempts, new Predicate<PaymentAttemptModelDao>() {
+                        @Override
+                        public boolean apply(final PaymentAttemptModelDao input) {
+                            return input.getStateName().equals("SUCCESS") ||
+                                   input.getStateName().equals("RETRIED") ||
+                                   input.getStateName().equals("ABORTED");
+                        }
+                    }));
+                    return filteredAttempts.size() == 2;
+                }
+            });
+        } catch (final TimeoutException e) {
+            fail("Timeout ");
+        }
+
+        attempts = paymentDao.getPaymentAttempts(payment.getExternalKey(), internalCallContext);
+        final int expectedAttempts = 2;
+        assertEquals(attempts.size(), expectedAttempts);
+        Collections.sort(attempts, new Comparator<PaymentAttemptModelDao>() {
             @Override
-            public int compare(final PaymentAttempt o1, final PaymentAttempt o2) {
-                return o1.getEffectiveDate().compareTo(o2.getEffectiveDate());
+            public int compare(final PaymentAttemptModelDao o1, final PaymentAttemptModelDao o2) {
+                return o1.getCreatedDate().compareTo(o2.getCreatedDate());
             }
         });
 
         for (int i = 0; i < attempts.size(); i++) {
-            final PaymentAttempt cur = attempts.get(i);
+            final PaymentAttemptModelDao cur = attempts.get(i);
             if (i < attempts.size() - 1) {
-                if (failureType == FailureType.PAYMENT_FAILURE) {
-                    assertEquals(cur.getPaymentStatus(), PaymentStatus.PAYMENT_FAILURE);
-                } else {
-                    assertEquals(cur.getPaymentStatus(), PaymentStatus.PLUGIN_FAILURE);
-                }
-            } else if (maxTries <= getMaxRetrySizeForFailureType(failureType)) {
-                assertEquals(cur.getPaymentStatus(), PaymentStatus.SUCCESS);
-                assertEquals(payment.getPaymentStatus(), PaymentStatus.SUCCESS);
+                assertEquals(cur.getStateName(), "RETRIED");
             } else {
-                if (failureType == FailureType.PAYMENT_FAILURE) {
-                    assertEquals(cur.getPaymentStatus(), PaymentStatus.PAYMENT_FAILURE_ABORTED);
-                    assertEquals(payment.getPaymentStatus(), PaymentStatus.PAYMENT_FAILURE_ABORTED);
-                } else {
-                    assertEquals(cur.getPaymentStatus(), PaymentStatus.PLUGIN_FAILURE_ABORTED);
-                    assertEquals(payment.getPaymentStatus(), PaymentStatus.PLUGIN_FAILURE_ABORTED);
-                }
+                assertEquals(cur.getStateName(), "SUCCESS");
             }
         }
     }
 
-    private enum FailureType {
-        PLUGIN_EXCEPTION,
-        PAYMENT_FAILURE
+    @Test(groups = "fast")
+    public void testFailedPaymentWithLastRetrySuccess() throws Exception {
+
+        final Account account = testHelper.createTestAccount("yiyi.gmail.com", true);
+        final Invoice invoice = testHelper.createTestInvoice(account, clock.getUTCToday(), Currency.USD);
+        final BigDecimal amount = new BigDecimal("10.00");
+        final UUID subscriptionId = UUID.randomUUID();
+        final UUID bundleId = UUID.randomUUID();
+
+        final LocalDate startDate = clock.getUTCToday();
+        final LocalDate endDate = startDate.plusMonths(1);
+        invoice.addInvoiceItem(new MockRecurringInvoiceItem(invoice.getId(),
+                                                            account.getId(),
+                                                            subscriptionId,
+                                                            bundleId,
+                                                            "test plan", "test phase", null,
+                                                            startDate,
+                                                            endDate,
+                                                            amount,
+                                                            new BigDecimal("1.0"),
+                                                            Currency.USD));
+        setPaymentFailure(FailureType.PAYMENT_FAILURE);
+
+        final String paymentExternalKey = UUID.randomUUID().toString();
+        final String transactionExternalKey = UUID.randomUUID().toString();
+        pluginControlPaymentProcessor.createPurchase(false, account, account.getPaymentMethodId(), null, amount, Currency.USD, paymentExternalKey, transactionExternalKey,
+                                                     createPropertiesForInvoice(invoice), ImmutableList.<String>of(InvoicePaymentControlPluginApi.PLUGIN_NAME), callContext, internalCallContext);
+
+        Payment payment = getPaymentForExternalKey(paymentExternalKey);
+        List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+        assertEquals(attempts.size(), 1);
+
+        final List<PaymentTransactionModelDao> transactions = paymentDao.getTransactionsForPayment(payment.getId(), internalCallContext);
+        assertEquals(transactions.size(), 1);
+
+        int maxTries = paymentConfig.getPaymentFailureRetryDays(internalCallContext).size();
+        for (int curFailure = 0; curFailure < maxTries; curFailure++) {
+
+            // Set plugin to fail with specific type unless this is the last attempt and we want a success
+            if (curFailure < (maxTries - 1)) {
+                setPaymentFailure(FailureType.PAYMENT_FAILURE);
+            }
+
+            moveClockForFailureType(FailureType.PAYMENT_FAILURE, curFailure);
+            final int curFailureCondition = curFailure;
+
+            try {
+                await().atMost(TIMEOUT, SECONDS).until(new Callable<Boolean>() {
+                    @Override
+                    public Boolean call() throws Exception {
+                        final List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+                        final List<PaymentAttemptModelDao> filteredAttempts = ImmutableList.copyOf(Iterables.filter(attempts, new Predicate<PaymentAttemptModelDao>() {
+                            @Override
+                            public boolean apply(final PaymentAttemptModelDao input) {
+                                return input.getStateName().equals("SUCCESS") ||
+                                       input.getStateName().equals("RETRIED") ||
+                                       input.getStateName().equals("ABORTED");
+                            }
+                        }));
+                        return filteredAttempts.size() == curFailureCondition + 2;
+                    }
+                });
+            } catch (final TimeoutException e) {
+                fail("Timeout curFailure = " + curFailureCondition);
+            }
+        }
+        attempts = paymentDao.getPaymentAttempts(payment.getExternalKey(), internalCallContext);
+        final int expectedAttempts = maxTries + 1;
+        assertEquals(attempts.size(), expectedAttempts);
+        Collections.sort(attempts, new Comparator<PaymentAttemptModelDao>() {
+            @Override
+            public int compare(final PaymentAttemptModelDao o1, final PaymentAttemptModelDao o2) {
+                return o1.getCreatedDate().compareTo(o2.getCreatedDate());
+            }
+        });
+
+        for (int i = 0; i < attempts.size(); i++) {
+            final PaymentAttemptModelDao cur = attempts.get(i);
+            if (i < attempts.size() - 1) {
+                assertEquals(cur.getStateName(), "RETRIED");
+            } else {
+                assertEquals(cur.getStateName(), "SUCCESS");
+            }
+        }
+
+    }
+
+    @Test(groups = "fast")
+    public void testAbortedPayment() throws Exception {
+
+        final Account account = testHelper.createTestAccount("yiyi.gmail.com", true);
+        final Invoice invoice = testHelper.createTestInvoice(account, clock.getUTCToday(), Currency.USD);
+        final BigDecimal amount = new BigDecimal("10.00");
+        final UUID subscriptionId = UUID.randomUUID();
+        final UUID bundleId = UUID.randomUUID();
+
+        final LocalDate startDate = clock.getUTCToday();
+        final LocalDate endDate = startDate.plusMonths(1);
+        invoice.addInvoiceItem(new MockRecurringInvoiceItem(invoice.getId(),
+                                                            account.getId(),
+                                                            subscriptionId,
+                                                            bundleId,
+                                                            "test plan", "test phase", null,
+                                                            startDate,
+                                                            endDate,
+                                                            amount,
+                                                            new BigDecimal("1.0"),
+                                                            Currency.USD));
+        setPaymentFailure(FailureType.PAYMENT_FAILURE);
+
+        final String paymentExternalKey = UUID.randomUUID().toString();
+        final String transactionExternalKey = UUID.randomUUID().toString();
+        pluginControlPaymentProcessor.createPurchase(false, account, account.getPaymentMethodId(), null, amount, Currency.USD, paymentExternalKey, transactionExternalKey,
+                                                     createPropertiesForInvoice(invoice), ImmutableList.<String>of(InvoicePaymentControlPluginApi.PLUGIN_NAME), callContext, internalCallContext);
+
+        Payment payment = getPaymentForExternalKey(paymentExternalKey);
+        List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+        assertEquals(attempts.size(), 1);
+
+        final List<PaymentTransactionModelDao> transactions = paymentDao.getTransactionsForPayment(payment.getId(), internalCallContext);
+        assertEquals(transactions.size(), 1);
+
+        int maxTries = paymentConfig.getPaymentFailureRetryDays(internalCallContext).size();
+        for (int curFailure = 0; curFailure < maxTries; curFailure++) {
+
+            // Set plugin to fail with specific type unless this is the last attempt and we want a success
+            setPaymentFailure(FailureType.PAYMENT_FAILURE);
+
+            moveClockForFailureType(FailureType.PAYMENT_FAILURE, curFailure);
+            final int curFailureCondition = curFailure;
+
+            try {
+                await().atMost(TIMEOUT, SECONDS).until(new Callable<Boolean>() {
+                    @Override
+                    public Boolean call() throws Exception {
+                        final List<PaymentAttemptModelDao> attempts = paymentDao.getPaymentAttempts(paymentExternalKey, internalCallContext);
+                        final List<PaymentAttemptModelDao> filteredAttempts = ImmutableList.copyOf(Iterables.filter(attempts, new Predicate<PaymentAttemptModelDao>() {
+                            @Override
+                            public boolean apply(final PaymentAttemptModelDao input) {
+                                return input.getStateName().equals("SUCCESS") ||
+                                       input.getStateName().equals("RETRIED") ||
+                                       input.getStateName().equals("ABORTED");
+                            }
+                        }));
+                        return filteredAttempts.size() == curFailureCondition + 2;
+                    }
+                });
+            } catch (final TimeoutException e) {
+                fail("Timeout curFailure = " + curFailureCondition);
+            }
+        }
+        attempts = paymentDao.getPaymentAttempts(payment.getExternalKey(), internalCallContext);
+        final int expectedAttempts = maxTries + 1;
+        assertEquals(attempts.size(), expectedAttempts);
+        Collections.sort(attempts, new Comparator<PaymentAttemptModelDao>() {
+            @Override
+            public int compare(final PaymentAttemptModelDao o1, final PaymentAttemptModelDao o2) {
+                return o1.getCreatedDate().compareTo(o2.getCreatedDate());
+            }
+        });
+
+        for (int i = 0; i < attempts.size(); i++) {
+            final PaymentAttemptModelDao cur = attempts.get(i);
+            if (i < attempts.size() - 1) {
+                assertEquals(cur.getStateName(), "RETRIED");
+            } else {
+                assertEquals(cur.getStateName(), "ABORTED");
+            }
+        }
     }
 
     private void setPaymentFailure(final FailureType failureType) {
@@ -211,20 +391,32 @@ public class TestRetryService extends PaymentTestSuiteNoDB {
         }
     }
 
-    private void moveClockForFailureType(final FailureType failureType, final int curFailure) {
+    private void moveClockForFailureType(final FailureType failureType, final int curFailure) throws InterruptedException {
+        final int nbDays;
         if (failureType == FailureType.PAYMENT_FAILURE) {
-            final int nbDays = paymentConfig.getPaymentRetryDays().get(curFailure);
-            clock.addDays(nbDays + 1);
+            nbDays = paymentConfig.getPaymentFailureRetryDays(internalCallContext).get(curFailure) + 1;
         } else {
-            clock.addDays(1);
+            nbDays = 1;
         }
+        clock.addDays(nbDays);
     }
 
     private int getMaxRetrySizeForFailureType(final FailureType failureType) {
         if (failureType == FailureType.PAYMENT_FAILURE) {
-            return paymentConfig.getPaymentRetryDays().size();
+            return paymentConfig.getPaymentFailureRetryDays(internalCallContext).size();
         } else {
-            return paymentConfig.getPluginFailureRetryMaxAttempts();
+            return 0;
         }
+    }
+
+    private List<PluginProperty> createPropertiesForInvoice(final Invoice invoice) {
+        final List<PluginProperty> result = new ArrayList<PluginProperty>();
+        result.add(new PluginProperty(InvoicePaymentControlPluginApi.PROP_IPCD_INVOICE_ID, invoice.getId().toString(), false));
+        return result;
+    }
+
+    private enum FailureType {
+        PLUGIN_EXCEPTION,
+        PAYMENT_FAILURE
     }
 }

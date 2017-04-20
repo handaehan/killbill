@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,9 +24,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.servlet.ReadListener;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
@@ -44,25 +50,31 @@ import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import javax.ws.rs.core.UriInfo;
 
 import org.killbill.billing.account.api.AccountUserApi;
-import org.killbill.clock.Clock;
 import org.killbill.billing.jaxrs.util.Context;
 import org.killbill.billing.jaxrs.util.JaxrsUriBuilder;
+import org.killbill.billing.payment.api.PaymentApi;
 import org.killbill.billing.util.api.AuditUserApi;
 import org.killbill.billing.util.api.CustomFieldUserApi;
 import org.killbill.billing.util.api.TagUserApi;
+import org.killbill.clock.Clock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.io.ByteStreams;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.google.inject.name.Named;
+import com.sun.jersey.api.representation.Form;
+import io.swagger.annotations.Api;
 
 @Singleton
 @Path(JaxrsResource.PLUGINS_PATH + "{subResources:.*}")
+@Api(value = JaxrsResource.PLUGINS_PATH + "{subResources:.*}", description = "Plugins servlets", hidden = true)
 public class PluginResource extends JaxRsResourceBase {
 
     private static final Logger log = LoggerFactory.getLogger(PluginResource.class);
@@ -72,15 +84,16 @@ public class PluginResource extends JaxRsResourceBase {
     private final HttpServlet osgiServlet;
 
     @Inject
-    public PluginResource(@Named("osgi") final HttpServlet osgiServlet,
+    public PluginResource(@Named("osgi") final HttpServlet osgiServlet, // See DefaultOSGIModule.OSGI_NAMED
                           final JaxrsUriBuilder uriBuilder,
                           final TagUserApi tagUserApi,
                           final CustomFieldUserApi customFieldUserApi,
                           final AuditUserApi auditUserApi,
                           final AccountUserApi accountUserApi,
+                          final PaymentApi paymentApi,
                           final Clock clock,
                           final Context context) {
-        super(uriBuilder, tagUserApi, customFieldUserApi, auditUserApi, accountUserApi, clock, context);
+        super(uriBuilder, tagUserApi, customFieldUserApi, auditUserApi, accountUserApi, paymentApi, null, clock, context);
         this.osgiServlet = osgiServlet;
     }
 
@@ -88,24 +101,27 @@ public class PluginResource extends JaxRsResourceBase {
     public Response doDELETE(@javax.ws.rs.core.Context final HttpServletRequest request,
                              @javax.ws.rs.core.Context final HttpServletResponse response,
                              @javax.ws.rs.core.Context final ServletContext servletContext,
-                             @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig);
+                             @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                             @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig, uriInfo);
     }
 
     @GET
     public Response doGET(@javax.ws.rs.core.Context final HttpServletRequest request,
                           @javax.ws.rs.core.Context final HttpServletResponse response,
                           @javax.ws.rs.core.Context final ServletContext servletContext,
-                          @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig);
+                          @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                          @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig, uriInfo);
     }
 
     @OPTIONS
     public Response doOPTIONS(@javax.ws.rs.core.Context final HttpServletRequest request,
                               @javax.ws.rs.core.Context final HttpServletResponse response,
                               @javax.ws.rs.core.Context final ServletContext servletContext,
-                              @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig);
+                              @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                              @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig, uriInfo);
     }
 
     @POST
@@ -114,54 +130,61 @@ public class PluginResource extends JaxRsResourceBase {
                                @javax.ws.rs.core.Context final HttpServletRequest request,
                                @javax.ws.rs.core.Context final HttpServletResponse response,
                                @javax.ws.rs.core.Context final ServletContext servletContext,
-                               @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(form, request, response, servletContext, servletConfig);
+                               @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                               @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(form, request, response, servletContext, servletConfig, uriInfo);
     }
 
     @POST
     public Response doPOST(@javax.ws.rs.core.Context final HttpServletRequest request,
                            @javax.ws.rs.core.Context final HttpServletResponse response,
                            @javax.ws.rs.core.Context final ServletContext servletContext,
-                           @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig);
+                           @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                           @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig, uriInfo);
     }
 
     @PUT
     public Response doPUT(@javax.ws.rs.core.Context final HttpServletRequest request,
                           @javax.ws.rs.core.Context final HttpServletResponse response,
                           @javax.ws.rs.core.Context final ServletContext servletContext,
-                          @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig);
+                          @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                          @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(request, response, servletContext, servletConfig, uriInfo);
     }
 
     @HEAD
     public Response doHEAD(@javax.ws.rs.core.Context final HttpServletRequest request,
                            @javax.ws.rs.core.Context final HttpServletResponse response,
                            @javax.ws.rs.core.Context final ServletContext servletContext,
-                           @javax.ws.rs.core.Context final ServletConfig servletConfig) throws ServletException, IOException {
-        serviceViaOSGIPlugin(request, response, servletContext, servletConfig);
+                           @javax.ws.rs.core.Context final ServletConfig servletConfig,
+                           @javax.ws.rs.core.Context final UriInfo uriInfo) throws ServletException, IOException {
+        serviceViaOSGIPlugin(request, response, servletContext, servletConfig, uriInfo);
 
         // Make sure to return 204
         return Response.noContent().build();
     }
 
     private Response serviceViaOSGIPlugin(final HttpServletRequest request, final HttpServletResponse response,
-                                          final ServletContext servletContext, final ServletConfig servletConfig) throws ServletException, IOException {
-        return serviceViaOSGIPlugin(request, request.getInputStream(), response, servletContext, servletConfig);
+                                          final ServletContext servletContext, final ServletConfig servletConfig,
+                                          final UriInfo uriInfo) throws ServletException, IOException {
+        return serviceViaOSGIPlugin(request, request.getInputStream(), new Form(), response, servletContext, servletConfig, uriInfo);
     }
 
     private Response serviceViaOSGIPlugin(final MultivaluedMap<String, String> form,
                                           final HttpServletRequest request, final HttpServletResponse response,
-                                          final ServletContext servletContext, final ServletConfig servletConfig) throws ServletException, IOException {
+                                          final ServletContext servletContext, final ServletConfig servletConfig,
+                                          final UriInfo uriInfo) throws ServletException, IOException {
         // form will contain form parameters, if any. Even if the request contains such parameters, it may be empty
         // if a filter (e.g. Shiro) has already consumed them (see kludge below)
-        return serviceViaOSGIPlugin(request, createInputStream(request, form), response, servletContext, servletConfig);
+        return serviceViaOSGIPlugin(request, createInputStream(request, form), form, response, servletContext, servletConfig, uriInfo);
     }
 
-    private Response serviceViaOSGIPlugin(final HttpServletRequest request, final InputStream inputStream, final HttpServletResponse response,
-                                          final ServletContext servletContext, final ServletConfig servletConfig) throws ServletException, IOException {
+    private Response serviceViaOSGIPlugin(final HttpServletRequest request, final InputStream inputStream, final MultivaluedMap<String, String> formData,
+                                          final HttpServletResponse response, final ServletContext servletContext,
+                                          final ServletConfig servletConfig, final UriInfo uriInfo) throws ServletException, IOException {
         prepareOSGIRequest(request, servletContext, servletConfig);
-        osgiServlet.service(new OSGIServletRequestWrapper(request, inputStream), new OSGIServletResponseWrapper(response));
+        osgiServlet.service(new OSGIServletRequestWrapper(request, inputStream, formData, uriInfo.getQueryParameters()), new OSGIServletResponseWrapper(response));
 
         if (response.isCommitted()) {
             if (response.getStatus() >= 400) {
@@ -218,10 +241,52 @@ public class PluginResource extends JaxRsResourceBase {
     private static final class OSGIServletRequestWrapper extends HttpServletRequestWrapper {
 
         private final InputStream inputStream;
+        private final Map<String, String[]> parameterMap;
 
-        public OSGIServletRequestWrapper(final HttpServletRequest request, final InputStream inputStream) {
+        public OSGIServletRequestWrapper(final HttpServletRequest request, final InputStream inputStream, final MultivaluedMap<String, String> formData, final MultivaluedMap<String, String> queryParameters) {
             super(request);
             this.inputStream = inputStream;
+            this.parameterMap = new HashMap<String, String[]>();
+
+            // Query string parameters and posted form data must appear in the parameters
+            final LinkedHashMultimap<String, String> tmpParameterMap = LinkedHashMultimap.<String, String>create();
+            for (final String formDataKey : formData.keySet()) {
+                tmpParameterMap.putAll(formDataKey, formData.get(formDataKey));
+            }
+            for (final String queryParameterKey : queryParameters.keySet()) {
+                tmpParameterMap.putAll(queryParameterKey, queryParameters.get(queryParameterKey));
+            }
+            for (final String parameterKey : request.getParameterMap().keySet()) {
+                tmpParameterMap.putAll(parameterKey, ImmutableList.<String>copyOf(request.getParameterMap().get(parameterKey)));
+            }
+            for (final String value : tmpParameterMap.keys()) {
+                parameterMap.put(value, tmpParameterMap.get(value).toArray(new String[0]));
+            }
+        }
+
+        @Override
+        public String getParameter(final String name) {
+            final String[] values = parameterMap.get(name);
+            if (values == null || values.length == 0) {
+                return null;
+            } else {
+                return values[0];
+            }
+        }
+
+        @Override
+        public Map<String, String[]> getParameterMap() {
+            return Collections.<String, String[]>unmodifiableMap(parameterMap);
+        }
+
+        @Override
+        public Enumeration<String> getParameterNames() {
+            return Collections.<String>enumeration(parameterMap.keySet());
+        }
+
+        @Override
+        public String[] getParameterValues(final String name) {
+            return parameterMap.get(name);
         }
 
         @Override
@@ -248,6 +313,7 @@ public class PluginResource extends JaxRsResourceBase {
     private static final class ServletInputStreamWrapper extends ServletInputStream {
 
         private final InputStream inputStream;
+        private final AtomicBoolean eof = new AtomicBoolean(false);
 
         public ServletInputStreamWrapper(final InputStream inputStream) {
             this.inputStream = inputStream;
@@ -255,7 +321,26 @@ public class PluginResource extends JaxRsResourceBase {
 
         @Override
         public int read() throws IOException {
-            return inputStream.read();
+            final int next = inputStream.read();
+            if (next == -1) {
+                eof.set(true);
+            }
+            return next;
+        }
+
+        @Override
+        public boolean isFinished() {
+            return eof.get();
+        }
+
+        @Override
+        public boolean isReady() {
+            return true;
+        }
+
+        @Override
+        public void setReadListener(final ReadListener readListener) {
+            throw new UnsupportedOperationException("setReadListener");
         }
     }
 

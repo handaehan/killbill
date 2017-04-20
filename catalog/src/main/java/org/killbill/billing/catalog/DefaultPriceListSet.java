@@ -19,26 +19,31 @@ package org.killbill.billing.catalog;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
+
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.CatalogApiException;
+import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.PriceListSet;
 import org.killbill.billing.catalog.api.Product;
-import org.killbill.billing.util.config.catalog.ValidatingConfig;
-import org.killbill.billing.util.config.catalog.ValidationError;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.xmlloader.ValidatingConfig;
+import org.killbill.xmlloader.ValidationError;
+import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
-public class DefaultPriceListSet extends ValidatingConfig<StandaloneCatalog> {
+public class DefaultPriceListSet extends ValidatingConfig<StandaloneCatalog> implements PriceListSet {
     @XmlElement(required = true, name = "defaultPriceList")
-    private PriceListDefault defaultPricelist;
+    private DefaultPriceList defaultPricelist;
 
     @XmlElement(required = false, name = "childPriceList")
-    private DefaultPriceList[] childPriceLists = new DefaultPriceList[0];
+    private DefaultPriceList[] childPriceLists;
 
     public DefaultPriceListSet() {
         if (childPriceLists == null) {
@@ -46,23 +51,30 @@ public class DefaultPriceListSet extends ValidatingConfig<StandaloneCatalog> {
         }
     }
 
-    public DefaultPriceListSet(final PriceListDefault defaultPricelist, final DefaultPriceList[] childPriceLists) {
+    public DefaultPriceListSet(final DefaultPriceList defaultPricelist, final DefaultPriceList[] childPriceLists) {
         this.defaultPricelist = defaultPricelist;
-        this.childPriceLists = childPriceLists;
+        this.childPriceLists = childPriceLists != null ? childPriceLists : new DefaultPriceList[0];
     }
 
-    public DefaultPlan getPlanFrom(final String priceListName, final Product product,
-                                   final BillingPeriod period) throws CatalogApiException {
-        DefaultPlan result = null;
+    public Plan getPlanFrom(final Product product, final BillingPeriod period, final String priceListName) throws CatalogApiException {
+
+        Collection<Plan> plans = null;
         final DefaultPriceList pl = findPriceListFrom(priceListName);
         if (pl != null) {
-            result = pl.findPlan(product, period);
+            plans = pl.findPlans(product, period);
         }
-        if (result != null) {
-            return result;
+        if (plans.size() == 0) {
+            plans = defaultPricelist.findPlans(product, period);
         }
-
-        return defaultPricelist.findPlan(product, period);
+        switch(plans.size()) {
+            case 0:
+                return null;
+            case 1:
+                return plans.iterator().next();
+            default:
+                throw new CatalogApiException(ErrorCode.CAT_MULTIPLE_MATCHING_PLANS_FOR_PRICELIST,
+                                              priceListName, product.getName(), period);
+        }
     }
 
     public DefaultPriceList findPriceListFrom(final String priceListName) throws CatalogApiException {
@@ -94,6 +106,13 @@ public class DefaultPriceListSet extends ValidatingConfig<StandaloneCatalog> {
         return errors;
     }
 
+    @Override
+    public void initialize(final StandaloneCatalog catalog, final URI sourceURI) {
+        super.initialize(catalog, sourceURI);
+        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+    }
+
+
     public DefaultPriceList getDefaultPricelist() {
         return defaultPricelist;
     }
@@ -102,6 +121,7 @@ public class DefaultPriceListSet extends ValidatingConfig<StandaloneCatalog> {
         return childPriceLists;
     }
 
+    @Override
     public List<PriceList> getAllPriceLists() {
         final List<PriceList> result = new ArrayList<PriceList>(childPriceLists.length + 1);
         result.add(getDefaultPricelist());
@@ -111,5 +131,32 @@ public class DefaultPriceListSet extends ValidatingConfig<StandaloneCatalog> {
         return result;
     }
 
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof DefaultPriceListSet)) {
+            return false;
+        }
+
+        final DefaultPriceListSet that = (DefaultPriceListSet) o;
+
+        if (!Arrays.equals(childPriceLists, that.childPriceLists)) {
+            return false;
+        }
+        if (defaultPricelist != null ? !defaultPricelist.equals(that.defaultPricelist) : that.defaultPricelist != null) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = defaultPricelist != null ? defaultPricelist.hashCode() : 0;
+        result = 31 * result + (childPriceLists != null ? Arrays.hashCode(childPriceLists) : 0);
+        return result;
+    }
 
 }

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,73 +19,70 @@
 package org.killbill.billing;
 
 import java.io.IOException;
+import java.net.URL;
+import java.util.Enumeration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.skife.jdbi.v2.IDBI;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.killbill.commons.embeddeddb.EmbeddedDB;
-import org.killbill.commons.embeddeddb.h2.H2EmbeddedDB;
-import org.killbill.commons.embeddeddb.mysql.MySQLEmbeddedDB;
-import org.killbill.commons.embeddeddb.mysql.MySQLStandaloneDB;
-import org.killbill.billing.dbi.DBIProvider;
+import org.killbill.billing.platform.test.PlatformDBTestingHelper;
+import org.killbill.billing.util.dao.AuditLogModelDaoMapper;
+import org.killbill.billing.util.dao.RecordIdIdMappingsMapper;
 import org.killbill.billing.util.io.IOUtils;
+import org.killbill.billing.util.security.shiro.dao.SessionModelDao;
+import org.killbill.commons.embeddeddb.EmbeddedDB;
+import org.killbill.commons.jdbi.mapper.LowerToCamelBeanMapperFactory;
+import org.skife.jdbi.v2.DBI;
+import org.skife.jdbi.v2.IDBI;
 
-import com.google.common.io.Resources;
+import com.google.common.base.MoreObjects;
 
-public class DBTestingHelper {
+public class DBTestingHelper extends PlatformDBTestingHelper {
 
-    private static final Logger log = LoggerFactory.getLogger(DBTestingHelper.class);
+    private static DBTestingHelper dbTestingHelper = null;
 
-    protected static EmbeddedDB instance;
+    private AtomicBoolean initialized;
 
-    public static synchronized EmbeddedDB get() {
-        if (instance == null) {
-            if ("true".equals(System.getProperty("org.killbill.billing.dbi.test.h2"))) {
-                log.info("Using h2 as the embedded database");
-                instance = new H2EmbeddedDB();
-            } else {
-                if (isUsingLocalInstance()) {
-                    log.info("Using MySQL local database");
-                    final String databaseName = System.getProperty("org.killbill.billing.dbi.test.localDb.database", "killbill");
-                    final String username = System.getProperty("org.killbill.billing.dbi.test.localDb.password", "root");
-                    final String password = System.getProperty("org.killbill.billing.dbi.test.localDb.username", "root");
-                    instance = new MySQLStandaloneDB(databaseName, username, password);
-                } else {
-                    log.info("Using MySQL as the embedded database");
-                    instance = new MySQLEmbeddedDB();
-                }
-            }
+    public static synchronized DBTestingHelper get() {
+        if (dbTestingHelper == null) {
+            dbTestingHelper = new DBTestingHelper();
         }
-        return instance;
+        return dbTestingHelper;
     }
 
-    public static synchronized IDBI getDBI() throws IOException {
-        return new DBIProvider(get().getDataSource()).get();
+    private DBTestingHelper() {
+        super();
+        initialized = new AtomicBoolean(false);
     }
 
-    public static synchronized void start() throws IOException {
-        final EmbeddedDB instance = get();
-        instance.initialize();
-        instance.start();
-
-        if (isUsingLocalInstance()) {
-            return;
+    @Override
+    public IDBI getDBI() {
+        final DBI dbi = (DBI) super.getDBI();
+        // Register KB specific mappers
+        if (initialized.compareAndSet(false, true)) {
+            dbi.registerMapper(new AuditLogModelDaoMapper());
+            dbi.registerMapper(new RecordIdIdMappingsMapper());
+            dbi.registerMapper(new LowerToCamelBeanMapperFactory(SessionModelDao.class));
         }
+        return dbi;
+    }
+
+    protected synchronized void executePostStartupScripts() throws IOException {
+
+        final EmbeddedDB instance = getInstance();
+        final String databaseSpecificDDL = "org/killbill/billing/util/" + "ddl-" + instance.getDBEngine().name().toLowerCase() + ".sql";
+        installDDLSilently(databaseSpecificDDL);
 
         // We always want the accounts and tenants table
         instance.executeScript("drop table if exists accounts;" +
                                "CREATE TABLE accounts (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
                                "    external_key varchar(128) NULL,\n" +
                                "    email varchar(128) NOT NULL,\n" +
                                "    name varchar(100) NOT NULL,\n" +
                                "    first_name_length int NOT NULL,\n" +
-                               "    currency char(3) DEFAULT NULL,\n" +
+                               "    currency varchar(3) DEFAULT NULL,\n" +
                                "    billing_cycle_day_local int DEFAULT NULL,\n" +
-                               "    billing_cycle_day_utc int DEFAULT NULL,\n" +
-                               "    payment_method_id char(36) DEFAULT NULL,\n" +
+                               "    payment_method_id varchar(36) DEFAULT NULL,\n" +
                                "    time_zone varchar(50) DEFAULT NULL,\n" +
                                "    locale varchar(5) DEFAULT NULL,\n" +
                                "    address1 varchar(100) DEFAULT NULL,\n" +
@@ -94,19 +93,19 @@ public class DBTestingHelper {
                                "    country varchar(50) DEFAULT NULL,\n" +
                                "    postal_code varchar(16) DEFAULT NULL,\n" +
                                "    phone varchar(25) DEFAULT NULL,\n" +
-                               "    migrated bool DEFAULT false,\n" +
+                               "    migrated boolean default false,\n" +
                                "    is_notified_for_invoices boolean NOT NULL,\n" +
                                "    created_date datetime NOT NULL,\n" +
                                "    created_by varchar(50) NOT NULL,\n" +
                                "    updated_date datetime DEFAULT NULL,\n" +
                                "    updated_by varchar(50) DEFAULT NULL,\n" +
-                               "    tenant_record_id int(11) unsigned default null,\n" +
+                               "    tenant_record_id bigint /*! unsigned */ not null default 0,\n" +
                                "    PRIMARY KEY(record_id)\n" +
                                ");");
         instance.executeScript("DROP TABLE IF EXISTS tenants;\n" +
                                "CREATE TABLE tenants (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
                                "    external_key varchar(128) NULL,\n" +
                                "    api_key varchar(128) NULL,\n" +
                                "    api_secret varchar(128) NULL,\n" +
@@ -121,76 +120,81 @@ public class DBTestingHelper {
         // We always want the basic tables when we do account_record_id lookups (e.g. for custom fields, tags or junction)
         instance.executeScript("DROP TABLE IF EXISTS bundles;\n" +
                                "CREATE TABLE bundles (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
                                "    external_key varchar(64) NOT NULL,\n" +
-                               "    account_id char(36) NOT NULL,\n" +
+                               "    account_id varchar(36) NOT NULL,\n" +
                                "    last_sys_update_date datetime,\n" +
                                "    created_by varchar(50) NOT NULL,\n" +
                                "    created_date datetime NOT NULL,\n" +
                                "    updated_by varchar(50) NOT NULL,\n" +
                                "    updated_date datetime NOT NULL,\n" +
-                               "    account_record_id int(11) unsigned default null,\n" +
-                               "    tenant_record_id int(11) unsigned default null,\n" +
+                               "    account_record_id bigint /*! unsigned */ not null,\n" +
+                               "    tenant_record_id bigint /*! unsigned */ not null default 0,\n" +
                                "    PRIMARY KEY(record_id)\n" +
                                ");");
         instance.executeScript("DROP TABLE IF EXISTS subscriptions;\n" +
                                "CREATE TABLE subscriptions (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
-                               "    bundle_id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
+                               "    bundle_id varchar(36) NOT NULL,\n" +
                                "    category varchar(32) NOT NULL,\n" +
                                "    start_date datetime NOT NULL,\n" +
                                "    bundle_start_date datetime NOT NULL,\n" +
-                               "    active_version int(11) DEFAULT 1,\n" +
+                               "    active_version int DEFAULT 1,\n" +
                                "    charged_through_date datetime DEFAULT NULL,\n" +
                                "    paid_through_date datetime DEFAULT NULL,\n" +
                                "    created_by varchar(50) NOT NULL,\n" +
                                "    created_date datetime NOT NULL,\n" +
                                "    updated_by varchar(50) NOT NULL,\n" +
                                "    updated_date datetime NOT NULL,\n" +
-                               "    account_record_id int(11) unsigned default null,\n" +
-                               "    tenant_record_id int(11) unsigned default null,\n" +
+                               "    account_record_id bigint /*! unsigned */ not null,\n" +
+                               "    tenant_record_id bigint /*! unsigned */ not null default 0,\n" +
                                "    PRIMARY KEY(record_id)\n" +
                                ");");
 
         // HACK (PIERRE): required by invoice tests which perform payments lookups to find the account record id for the internal callcontext
         instance.executeScript("DROP TABLE IF EXISTS payments;\n" +
                                "CREATE TABLE payments (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
-                               "    account_id char(36) NOT NULL,\n" +
-                               "    invoice_id char(36) NOT NULL,\n" +
-                               "    payment_method_id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
+                               "    account_id varchar(36) NOT NULL,\n" +
+                               "    invoice_id varchar(36) NOT NULL,\n" +
+                               "    payment_method_id varchar(36) NOT NULL,\n" +
                                "    amount numeric(15,9),\n" +
-                               "    currency char(3),\n" +
+                               "    currency varchar(3),\n" +
                                "    effective_date datetime,\n" +
                                "    payment_status varchar(50),\n" +
                                "    created_by varchar(50) NOT NULL,\n" +
                                "    created_date datetime NOT NULL,\n" +
                                "    updated_by varchar(50) NOT NULL,\n" +
                                "    updated_date datetime NOT NULL,\n" +
-                               "    account_record_id int(11) unsigned default null,\n" +
-                               "    tenant_record_id int(11) unsigned default null,\n" +
+                               "    account_record_id bigint /*! unsigned */ not null,\n" +
+                               "    tenant_record_id bigint /*! unsigned */ not null default 0,\n" +
                                "    PRIMARY KEY (record_id)\n" +
                                ");");
 
-        for (final String pack : new String[]{"account", "analytics", "beatrix", "subscription", "util", "payment", "invoice", "entitlement", "usage", "meter", "tenant"}) {
+        for (final String pack : new String[]{"catalog", "account", "analytics", "beatrix", "subscription", "util", "payment", "invoice", "entitlement", "usage", "meter", "tenant"}) {
             for (final String ddlFile : new String[]{"ddl.sql", "ddl_test.sql"}) {
-                final String ddl;
-                try {
-                    ddl = IOUtils.toString(Resources.getResource("org/killbill/billing/" + pack + "/" + ddlFile).openStream());
-                } catch (final IllegalArgumentException ignored) {
-                    // The test doesn't have this module ddl in the classpath - that's fine
-                    continue;
-                }
-                instance.executeScript(ddl);
+                final String resourceName = "org/killbill/billing/" + pack + "/" + ddlFile;
+                installDDLSilently(resourceName);
             }
         }
-        instance.refreshTableNames();
     }
 
-    private static boolean isUsingLocalInstance() {
-        return (System.getProperty("org.killbill.billing.dbi.test.useLocalDb") != null);
+    private void installDDLSilently(final String resourceName) throws IOException {
+        final ClassLoader classLoader = MoreObjects.firstNonNull(Thread.currentThread().getContextClassLoader(), DBTestingHelper.class.getClassLoader());
+        final Enumeration<URL> resources = classLoader.getResources(resourceName);
+        while (resources.hasMoreElements()) {
+            final URL inputStream = resources.nextElement();
+
+            final String ddl;
+            try {
+                ddl = IOUtils.toString(inputStream.openStream());
+                getInstance().executeScript(ddl);
+            } catch (final Exception ignored) {
+                // The test doesn't have this module ddl in the classpath - that's fine
+            }
+        }
     }
 }

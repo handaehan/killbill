@@ -35,12 +35,17 @@ public enum TableName {
     INVOICE_ITEMS("invoice_items", ObjectType.INVOICE_ITEM),
     INVOICE_PAYMENTS("invoice_payments", ObjectType.INVOICE_PAYMENT),
     INVOICES("invoices", ObjectType.INVOICE),
+    INVOICE_PARENT_CHILDREN("invoice_parent_children"),
+    NODE_INFOS("node_infos"),
     PAYMENT_ATTEMPT_HISTORY("payment_attempt_history"),
     PAYMENT_ATTEMPTS("payment_attempts", ObjectType.PAYMENT_ATTEMPT, PAYMENT_ATTEMPT_HISTORY),
     PAYMENT_HISTORY("payment_history"),
     PAYMENTS("payments", ObjectType.PAYMENT, PAYMENT_HISTORY),
     PAYMENT_METHOD_HISTORY("payment_method_history"),
     PAYMENT_METHODS("payment_methods", ObjectType.PAYMENT_METHOD, PAYMENT_METHOD_HISTORY),
+    PAYMENT_TRANSACTION_HISTORY("payment_transaction_history"),
+    PAYMENT_TRANSACTIONS("payment_transactions", ObjectType.TRANSACTION, PAYMENT_TRANSACTION_HISTORY),
+    SERVICE_BRODCASTS("service_broadcasts", ObjectType.SERVICE_BROADCAST),
     SUBSCRIPTIONS("subscriptions", ObjectType.SUBSCRIPTION),
     SUBSCRIPTION_EVENTS("subscription_events", ObjectType.SUBSCRIPTION_EVENT),
     REFUND_HISTORY("refund_history"),
@@ -50,7 +55,9 @@ public enum TableName {
     TAG_HISTORY("tag_history"),
     TENANT("tenants", ObjectType.TENANT),
     TENANT_KVS("tenant_kvs", ObjectType.TENANT_KVS),
-    TAG("tags", ObjectType.TAG, TAG_HISTORY);
+    TENANT_BROADCASTS("tenant_broadcasts"),
+    TAG("tags", ObjectType.TAG, TAG_HISTORY),
+    ROLLED_UP_USAGE("rolled_up_usage");
 
     private final String tableName;
     private final ObjectType objectType;

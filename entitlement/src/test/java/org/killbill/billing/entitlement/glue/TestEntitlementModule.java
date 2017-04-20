@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,16 +18,21 @@
 
 package org.killbill.billing.entitlement.glue;
 
-import org.skife.config.ConfigSource;
-
+import org.killbill.billing.mock.glue.MockTenantModule;
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.util.glue.CacheModule;
 import org.killbill.billing.util.glue.CallContextModule;
+import org.killbill.billing.util.glue.ConfigModule;
+import org.killbill.billing.util.glue.KillBillShiroAopModule;
+import org.killbill.billing.util.glue.KillBillShiroModule;
+import org.killbill.billing.util.glue.SecurityModule;
+import org.killbill.billing.util.glue.TestUtilModuleNoDB.ShiroModuleNoDB;
 
 public class TestEntitlementModule extends DefaultEntitlementModule {
 
-    final protected ConfigSource configSource;
+    protected final KillbillConfigSource configSource;
 
-    public TestEntitlementModule(final ConfigSource configSource) {
+    public TestEntitlementModule(final KillbillConfigSource configSource) {
         super(configSource);
         this.configSource = configSource;
     }
@@ -34,6 +41,28 @@ public class TestEntitlementModule extends DefaultEntitlementModule {
     protected void configure() {
         super.configure();
         install(new CacheModule(configSource));
-        install(new CallContextModule());
+        install(new ConfigModule(configSource));
+        install(new CallContextModule(configSource));
+        install(new MockTenantModule(configSource));
+
+        install(new KillBillShiroModuleOnlyIniRealm(configSource));
+        install(new KillBillShiroAopModule());
+
+        install(new SecurityModule(configSource));
+
     }
+
+
+    private static class KillBillShiroModuleOnlyIniRealm extends KillBillShiroModule {
+
+        public KillBillShiroModuleOnlyIniRealm(final KillbillConfigSource configSource) {
+            super(configSource);
+        }
+        protected void configureJDBCRealm() {
+        }
+        protected void configureLDAPRealm() {
+        }
+
+    }
+
 }

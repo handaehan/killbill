@@ -24,10 +24,10 @@ import org.killbill.billing.events.BusInternalEvent;
 import org.killbill.billing.util.userrequest.CompletionUserRequest;
 import org.killbill.billing.util.userrequest.CompletionUserRequestNotifier;
 
+import com.google.common.eventbus.AllowConcurrentEvents;
 import com.google.common.eventbus.Subscribe;
 
 public class KillbillEventHandler {
-
 
     private final List<CompletionUserRequest> activeWaiters;
 
@@ -56,8 +56,9 @@ public class KillbillEventHandler {
     /*
      * Killbill server event handler
      */
+    @AllowConcurrentEvents
     @Subscribe
-    public void handleSubscriptionevents(final BusInternalEvent event) {
+    public void handleSubscriptionEvents(final BusInternalEvent event) {
         final List<CompletionUserRequestNotifier> runningWaiters = new ArrayList<CompletionUserRequestNotifier>();
         synchronized (activeWaiters) {
             runningWaiters.addAll(activeWaiters);

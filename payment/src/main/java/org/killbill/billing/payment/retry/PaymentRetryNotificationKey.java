@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -13,19 +15,43 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
+
 package org.killbill.billing.payment.retry;
 
+import java.util.List;
 import java.util.UUID;
 
-import org.killbill.notificationq.DefaultUUIDNotificationKey;
+import org.killbill.notificationq.api.NotificationEvent;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-public class PaymentRetryNotificationKey extends DefaultUUIDNotificationKey {
+public class PaymentRetryNotificationKey implements NotificationEvent {
+
+    private final UUID attemptId;
+    private final List<String> paymentControlPluginNames;
 
     @JsonCreator
-    public PaymentRetryNotificationKey(@JsonProperty("uuidKey") UUID uuidKey) {
-        super(uuidKey);
+    public PaymentRetryNotificationKey(@JsonProperty("attemptId") UUID attemptId,
+                                       @JsonProperty("paymentControlPluginNames") List<String> paymentControlPluginNames) {
+        this.attemptId = attemptId;
+        this.paymentControlPluginNames = paymentControlPluginNames;
+    }
+
+    public UUID getAttemptId() {
+        return attemptId;
+    }
+
+    public List<String> getPaymentControlPluginNames() {
+        return paymentControlPluginNames;
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("PaymentRetryNotificationKey{");
+        sb.append("attemptId=").append(attemptId);
+        sb.append(", paymentControlPluginNames=").append(paymentControlPluginNames);
+        sb.append('}');
+        return sb.toString();
     }
 }

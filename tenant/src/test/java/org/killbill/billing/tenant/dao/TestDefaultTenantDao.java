@@ -17,18 +17,18 @@
 package org.killbill.billing.tenant.dao;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.apache.shiro.authc.AuthenticationInfo;
 import org.apache.shiro.authc.AuthenticationToken;
 import org.apache.shiro.authc.UsernamePasswordToken;
 import org.testng.Assert;
-import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import org.killbill.billing.tenant.TenantTestSuiteWithEmbeddedDb;
 import org.killbill.billing.tenant.api.DefaultTenant;
-import org.killbill.billing.tenant.security.KillbillCredentialsMatcher;
+import org.killbill.billing.util.security.shiro.KillbillCredentialsMatcher;
 
 public class TestDefaultTenantDao extends TenantTestSuiteWithEmbeddedDb {
 
@@ -46,11 +46,11 @@ public class TestDefaultTenantDao extends TenantTestSuiteWithEmbeddedDb {
 
         // Good combo
         final AuthenticationToken goodToken = new UsernamePasswordToken(tenant.getApiKey(), tenant.getApiSecret());
-        Assert.assertTrue(KillbillCredentialsMatcher.getCredentialsMatcher().doCredentialsMatch(goodToken, authenticationInfo));
+        Assert.assertTrue(KillbillCredentialsMatcher.getCredentialsMatcher(securityConfig).doCredentialsMatch(goodToken, authenticationInfo));
 
         // Bad combo
         final AuthenticationToken badToken = new UsernamePasswordToken(tenant.getApiKey(), tenant.getApiSecret() + "T");
-        Assert.assertFalse(KillbillCredentialsMatcher.getCredentialsMatcher().doCredentialsMatch(badToken, authenticationInfo));
+        Assert.assertFalse(KillbillCredentialsMatcher.getCredentialsMatcher(securityConfig).doCredentialsMatch(badToken, authenticationInfo));
     }
 
     @Test(groups = "slow")
@@ -59,18 +59,72 @@ public class TestDefaultTenantDao extends TenantTestSuiteWithEmbeddedDb {
                                                        UUID.randomUUID().toString(), UUID.randomUUID().toString());
         tenantDao.create(new TenantModelDao(tenant), internalCallContext);
 
-        tenantDao.addTenantKeyValue("TheKey", "TheValue", internalCallContext);
+        tenantDao .addTenantKeyValue("THE_KEY", "TheValue", false, internalCallContext);
 
-        List<String> value = tenantDao.getTenantValueForKey("TheKey", internalCallContext);
+        List<String> value = tenantDao.getTenantValueForKey("THE_KEY", internalCallContext);
         Assert.assertEquals(value.size(), 1);
         Assert.assertEquals(value.get(0), "TheValue");
 
-        tenantDao.addTenantKeyValue("TheKey", "TheSecondValue", internalCallContext);
-        value = tenantDao.getTenantValueForKey("TheKey", internalCallContext);
+        tenantDao.addTenantKeyValue("THE_KEY", "TheSecondValue", false, internalCallContext);
+        value = tenantDao.getTenantValueForKey("THE_KEY", internalCallContext);
         Assert.assertEquals(value.size(), 2);
 
-        tenantDao.deleteTenantKey("TheKey", internalCallContext);
-        value = tenantDao.getTenantValueForKey("TheKey", internalCallContext);
+        value = tenantDao.getTenantValueForKey("THE_KEY", internalCallContext);
+        Assert.assertEquals(value.size(), 2);
+
+        tenantDao.deleteTenantKey("THE_KEY", internalCallContext);
+        value = tenantDao.getTenantValueForKey("THE_KEY", internalCallContext);
         Assert.assertEquals(value.size(), 0);
     }
+
+
+
+
+    @Test(groups = "slow")
+    public void testTenantKeyValueUpdate() throws Exception {
+        final DefaultTenant tenant = new DefaultTenant(UUID.randomUUID(), null, null, UUID.randomUUID().toString(),
+                                                       UUID.randomUUID().toString(), UUID.randomUUID().toString());
+        tenantDao.create(new TenantModelDao(tenant), internalCallContext);
+
+        tenantDao .addTenantKeyValue("MY_KEY", "TheValue1", false, internalCallContext);
+        tenantDao .addTenantKeyValue("MY_KEY", "TheValue2", false, internalCallContext);
+        tenantDao .addTenantKeyValue("MY_KEY", "TheValue3", false, internalCallContext);
+
+        final List<String> value = tenantDao.getTenantValueForKey("MY_KEY", internalCallContext);
+        Assert.assertEquals(value.size(), 3);
+
+
+        tenantDao.updateTenantLastKeyValue("MY_KEY", "NewValue3", internalCallContext);
+
+        final List<String> newValues = tenantDao.getTenantValueForKey("MY_KEY", internalCallContext);
+        Assert.assertEquals(newValues.size(), 3);
+
+        Assert.assertEquals(newValues.get(0), "TheValue1");
+        Assert.assertEquals(newValues.get(1), "TheValue2");
+        Assert.assertEquals(newValues.get(2), "NewValue3");
+    }
+
+
+    @Test(groups = "slow")
+    public void testTenantSearch() throws Exception {
+        final DefaultTenant tenant = new DefaultTenant(UUID.randomUUID(), null, null, UUID.randomUUID().toString(),
+                                                       UUID.randomUUID().toString(), UUID.randomUUID().toString());
+        tenantDao.create(new TenantModelDao(tenant), internalCallContext);
+
+        tenantDao .addTenantKeyValue("foobar", "foobar1", false, internalCallContext);
+        tenantDao .addTenantKeyValue("foobar", "foobar2", false, internalCallContext);
+        tenantDao .addTenantKeyValue("foobar", "foobar3", false, internalCallContext);
+
+
+        tenantDao.updateTenantLastKeyValue("foo", "foo1", internalCallContext);
+
+        tenantDao.updateTenantLastKeyValue("fooXX", "fooXX1", internalCallContext);
+
+        tenantDao.updateTenantLastKeyValue("bar", "bar", internalCallContext);
+
+        final List<TenantKVModelDao> result = tenantDao.searchTenantKeyValues("foo", internalCallContext);
+        Assert.assertEquals(result.size(), 5);
+
+    }
+
 }

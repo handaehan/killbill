@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,14 +18,19 @@
 
 package org.killbill.billing.entitlement;
 
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.UUID;
 
+import org.apache.shiro.SecurityUtils;
+import org.apache.shiro.config.Ini;
+import org.apache.shiro.config.IniSecurityManagerFactory;
+import org.apache.shiro.mgt.SecurityManager;
+import org.apache.shiro.util.Factory;
+import org.apache.shiro.util.ThreadContext;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.killbill.billing.GuicyKillbillTestSuiteWithEmbeddedDB;
-import org.killbill.billing.TestKillbillConfigSource;
+import org.killbill.billing.account.api.Account;
+import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.account.api.AccountData;
 import org.killbill.billing.account.api.AccountInternalApi;
 import org.killbill.billing.account.api.AccountUserApi;
@@ -39,15 +46,18 @@ import org.killbill.billing.entitlement.engine.core.EntitlementUtils;
 import org.killbill.billing.entitlement.engine.core.EventsStreamBuilder;
 import org.killbill.billing.entitlement.glue.TestEntitlementModuleWithEmbeddedDB;
 import org.killbill.billing.junction.BlockingInternalApi;
+import org.killbill.billing.lifecycle.api.BusService;
 import org.killbill.billing.mock.MockAccountBuilder;
+import org.killbill.billing.platform.api.KillbillConfigSource;
+import org.killbill.billing.security.Permission;
+import org.killbill.billing.security.api.SecurityApi;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.SubscriptionBaseService;
 import org.killbill.billing.subscription.engine.core.DefaultSubscriptionBaseService;
 import org.killbill.billing.tag.TagInternalApi;
-import org.killbill.billing.util.KillbillConfigSource;
 import org.killbill.billing.util.api.AuditUserApi;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
-import org.killbill.billing.util.svcsapi.bus.BusService;
+import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.billing.util.tag.dao.TagDao;
 import org.killbill.bus.api.PersistentBus;
 import org.killbill.clock.ClockMock;
@@ -106,12 +116,16 @@ public class EntitlementTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuiteWi
     protected AuditUserApi auditUserApi;
     @Inject
     protected InternalCallContextFactory internalCallContextFactory;
+    @Inject
+    protected SecurityApi securityApi;
+    @Inject
+    protected NonEntityDao nonEntityDao;
 
     protected Catalog catalog;
 
     @Override
-    protected KillbillConfigSource getConfigSource() throws IOException, URISyntaxException {
-        return new TestKillbillConfigSource("/entitlement.properties");
+    protected KillbillConfigSource getConfigSource() {
+        return getConfigSource("/entitlement.properties");
     }
 
     @BeforeClass(groups = "slow")
@@ -128,10 +142,41 @@ public class EntitlementTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuiteWi
 
         // Make sure we start with a clean state
         assertListenerStatus();
+
+        configureShiro();
+        login("EntitlementUser");
+    }
+
+    private void login(final String username) {
+        securityApi.login(username, "password");
+    }
+
+
+    protected void configureShiro() {
+        final Ini config = new Ini();
+        config.addSection("users");
+        config.getSection("users").put("EntitlementUser", "password, entitlement");
+        config.addSection("roles");
+        config.getSection("roles").put("entitlement", Permission.ACCOUNT_CAN_CREATE.toString() +
+                                                      "," + Permission.ENTITLEMENT_CAN_CREATE.toString() +
+                                                      "," + Permission.ENTITLEMENT_CAN_CHANGE_PLAN.toString() +
+                                                      "," + Permission.ENTITLEMENT_CAN_PAUSE_RESUME.toString() +
+                                                      "," + Permission.ENTITLEMENT_CAN_TRANSFER.toString() +
+                                                      "," + Permission.ENTITLEMENT_CAN_CANCEL.toString());
+
+        // Reset the security manager
+        ThreadContext.unbindSecurityManager();
+
+        final Factory<SecurityManager> factory = new IniSecurityManagerFactory(config);
+        final SecurityManager securityManager = factory.getInstance();
+        SecurityUtils.setSecurityManager(securityManager);
     }
 
     @AfterMethod(groups = "slow")
     public void afterMethod() throws Exception {
+
+        securityApi.logout();
+
         // Make sure we finish in a clean state
         assertListenerStatus();
 
@@ -141,7 +186,7 @@ public class EntitlementTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuiteWi
     private Catalog initCatalog(final CatalogService catalogService) throws Exception {
 
         ((DefaultCatalogService) catalogService).loadCatalog();
-        final Catalog catalog = catalogService.getFullCatalog();
+        final Catalog catalog = catalogService.getFullCatalog(true, true, internalCallContext);
         assertNotNull(catalog);
         return catalog;
     }
@@ -234,6 +279,14 @@ public class EntitlementTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuiteWi
                                        .paymentMethodId(UUID.randomUUID())
                                        .timeZone(DateTimeZone.UTC)
                                        .build();
+    }
+
+    protected Account createAccount(final AccountData accountData) throws AccountApiException {
+        final Account account = accountApi.createAccount(accountData, callContext);
+
+        refreshCallContext(account.getId());
+
+        return account;
     }
 
     protected void assertListenerStatus() {

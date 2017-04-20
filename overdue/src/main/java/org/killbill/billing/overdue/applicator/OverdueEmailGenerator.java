@@ -16,17 +16,20 @@
 
 package org.killbill.billing.overdue.applicator;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.killbill.billing.account.api.Account;
-import org.killbill.billing.entitlement.api.Blockable;
-import org.killbill.billing.overdue.OverdueState;
+import org.killbill.billing.overdue.api.OverdueState;
 import org.killbill.billing.overdue.applicator.formatters.OverdueEmailFormatterFactory;
 import org.killbill.billing.overdue.config.api.BillingState;
 import org.killbill.billing.util.email.templates.TemplateEngine;
+import org.killbill.billing.util.io.IOUtils;
 
+import com.google.common.io.CharSource;
 import com.google.inject.Inject;
 
 public class OverdueEmailGenerator {
@@ -51,6 +54,7 @@ public class OverdueEmailGenerator {
         data.put("nextOverdueState", nextOverdueState);
 
         // TODO single template for all languages for now
-        return templateEngine.executeTemplate(nextOverdueState.getEnterStateEmailNotification().getTemplateName(), data);
+        final InputStream input = new FileInputStream(nextOverdueState.getEmailNotification().getTemplateName());
+        return templateEngine.executeTemplateText(IOUtils.toString(input), data);
     }
 }

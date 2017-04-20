@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,7 +19,8 @@
 package org.killbill.billing.invoice.template.formatters;
 
 import java.math.BigDecimal;
-import java.text.NumberFormat;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -25,13 +28,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+import org.joda.money.CurrencyUnit;
 import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.currency.api.CurrencyConversion;
 import org.killbill.billing.currency.api.CurrencyConversionApi;
@@ -41,42 +43,50 @@ import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceItem;
 import org.killbill.billing.invoice.api.InvoiceItemType;
 import org.killbill.billing.invoice.api.InvoicePayment;
+import org.killbill.billing.invoice.api.InvoiceStatus;
 import org.killbill.billing.invoice.api.formatters.InvoiceFormatter;
+import org.killbill.billing.invoice.api.formatters.ResourceBundleFactory;
 import org.killbill.billing.invoice.model.CreditAdjInvoiceItem;
 import org.killbill.billing.invoice.model.CreditBalanceAdjInvoiceItem;
 import org.killbill.billing.invoice.model.DefaultInvoice;
 import org.killbill.billing.util.template.translation.TranslatorConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-
-import static org.killbill.billing.util.DefaultAmountFormatter.round;
 
 /**
  * Format invoice fields
  */
 public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
-    private final static Logger logger = LoggerFactory.getLogger(DefaultInvoiceFormatter.class);
+    private static final Logger logger = LoggerFactory.getLogger(DefaultInvoiceFormatter.class);
 
     private final TranslatorConfig config;
     private final Invoice invoice;
     private final DateTimeFormatter dateFormatter;
     private final Locale locale;
     private final CurrencyConversionApi currencyConversionApi;
+    private final InternalTenantContext context;
+    private final ResourceBundleFactory bundleFactory;
 
-    public DefaultInvoiceFormatter(final TranslatorConfig config, final Invoice invoice, final Locale locale, final CurrencyConversionApi currencyConversionApi) {
+    public DefaultInvoiceFormatter(final TranslatorConfig config, final Invoice invoice, final Locale locale,
+                                   final CurrencyConversionApi currencyConversionApi, final ResourceBundleFactory bundleFactory,
+                                   final InternalTenantContext context) {
         this.config = config;
         this.invoice = invoice;
-        dateFormatter = DateTimeFormat.mediumDate().withLocale(locale);
+        this.dateFormatter = DateTimeFormat.mediumDate().withLocale(locale);
         this.locale = locale;
         this.currencyConversionApi = currencyConversionApi;
+        this.bundleFactory = bundleFactory;
+        this.context = context;
     }
 
     @Override
     public Integer getInvoiceNumber() {
-        return Objects.firstNonNull(invoice.getInvoiceNumber(), 0);
+        return MoreObjects.firstNonNull(invoice.getInvoiceNumber(), 0);
     }
 
     @Override
@@ -90,10 +100,8 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
                 // Merge CBA items to avoid confusing the customer, since these are internal
                 // adjustments (auto generated)
                 mergedCBAItem = mergeCBAItem(invoiceItems, mergedCBAItem, item);
-            } else if (InvoiceItemType.REFUND_ADJ.equals(item.getInvoiceItemType()) ||
-                       InvoiceItemType.CREDIT_ADJ.equals(item.getInvoiceItemType())) {
-                // Merge refund adjustments and credit adjustments, as these are both
-                // the same for the customer (invoice adjustment)
+            } else if (InvoiceItemType.CREDIT_ADJ.equals(item.getInvoiceItemType())) {
+                // Merge credit adjustments, as these are both the same for the customer (invoice adjustment)
                 mergedInvoiceAdjustment = mergeInvoiceAdjustmentItem(invoiceItems, mergedInvoiceAdjustment, item);
             } else {
                 invoiceItems.add(item);
@@ -109,7 +117,7 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
         final List<InvoiceItem> formatters = new ArrayList<InvoiceItem>();
         for (final InvoiceItem item : invoiceItems) {
-            formatters.add(new DefaultInvoiceItemFormatter(config, item, dateFormatter, locale));
+            formatters.add(new DefaultInvoiceItemFormatter(config, item, dateFormatter, locale, context, bundleFactory));
         }
         return formatters;
     }
@@ -137,7 +145,7 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
             if (!mergedInvoiceAdjustment.getCurrency().equals(item.getCurrency())) {
                 invoiceItems.add(item);
             } else {
-                mergedInvoiceAdjustment = new CreditAdjInvoiceItem(invoice.getId(), invoice.getAccountId(), invoice.getInvoiceDate(),
+                mergedInvoiceAdjustment = new CreditAdjInvoiceItem(invoice.getId(), invoice.getAccountId(), invoice.getInvoiceDate(), mergedInvoiceAdjustment.getDescription(),
                                                                    mergedInvoiceAdjustment.getAmount().add(item.getAmount()), mergedInvoiceAdjustment.getCurrency());
             }
         }
@@ -156,7 +164,7 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
     @Override
     public <T extends InvoiceItem> List<InvoiceItem> getInvoiceItems(final Class<T> clazz) {
-        return Objects.firstNonNull(invoice.getInvoiceItems(clazz), ImmutableList.<InvoiceItem>of());
+        return MoreObjects.firstNonNull(invoice.getInvoiceItems(clazz), ImmutableList.<InvoiceItem>of());
     }
 
     @Override
@@ -176,7 +184,7 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
     @Override
     public List<InvoicePayment> getPayments() {
-        return Objects.firstNonNull(invoice.getPayments(), ImmutableList.<InvoicePayment>of());
+        return MoreObjects.firstNonNull(invoice.getPayments(), ImmutableList.<InvoicePayment>of());
     }
 
     @Override
@@ -191,35 +199,55 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
     @Override
     public BigDecimal getChargedAmount() {
-        return round(Objects.firstNonNull(invoice.getChargedAmount(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(invoice.getChargedAmount(), BigDecimal.ZERO);
     }
 
     @Override
     public BigDecimal getOriginalChargedAmount() {
-        return round(Objects.firstNonNull(invoice.getOriginalChargedAmount(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(invoice.getOriginalChargedAmount(), BigDecimal.ZERO);
     }
 
     @Override
     public BigDecimal getBalance() {
-        return round(Objects.firstNonNull(invoice.getBalance(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(invoice.getBalance(), BigDecimal.ZERO);
     }
 
     @Override
     public String getFormattedChargedAmount() {
-        final NumberFormat number = NumberFormat.getCurrencyInstance(locale);
-        return number.format(getChargedAmount().doubleValue());
+        return getFormattedAmountByLocaleAndInvoiceCurrency(getChargedAmount());
     }
 
     @Override
     public String getFormattedPaidAmount() {
-        final NumberFormat number = NumberFormat.getCurrencyInstance(locale);
-        return number.format(getPaidAmount().doubleValue());
+        return getFormattedAmountByLocaleAndInvoiceCurrency(getPaidAmount());
     }
 
     @Override
     public String getFormattedBalance() {
-        final NumberFormat number = NumberFormat.getCurrencyInstance(locale);
-        return number.format(getBalance().doubleValue());
+        return getFormattedAmountByLocaleAndInvoiceCurrency(getBalance());
+    }
+
+    // Returns the formatted amount with the correct currency symbol that is get from the invoice currency.
+    private String getFormattedAmountByLocaleAndInvoiceCurrency(final BigDecimal amount) {
+        final String invoiceCurrencyCode = invoice.getCurrency().toString();
+        final CurrencyUnit currencyUnit = CurrencyUnit.of(invoiceCurrencyCode);
+
+        final DecimalFormat numberFormatter = (DecimalFormat) DecimalFormat.getCurrencyInstance(locale);
+        final DecimalFormatSymbols dfs = numberFormatter.getDecimalFormatSymbols();
+        dfs.setInternationalCurrencySymbol(currencyUnit.getCurrencyCode());
+
+        try {
+            Currency currency = Currency.fromCode(invoiceCurrencyCode);
+            dfs.setCurrencySymbol(currency.getSymbol());
+        } catch (final IllegalArgumentException e) {
+            dfs.setCurrencySymbol(currencyUnit.getSymbol(locale));
+        }
+
+        numberFormatter.setDecimalFormatSymbols(dfs);
+        numberFormatter.setMinimumFractionDigits(currencyUnit.getDefaultFractionDigits());
+        numberFormatter.setMaximumFractionDigits(currencyUnit.getDefaultFractionDigits());
+
+        return numberFormatter.format(amount.doubleValue());
     }
 
     @Override
@@ -237,7 +265,7 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
         }
         // If there were multiple payments (and refunds) we pick chose the last one
         DateTime latestPaymentDate = null;
-        final Iterator<InvoicePayment> paymentIterator = ((DefaultInvoice) invoice).getPayments().iterator();
+        final Iterator<InvoicePayment> paymentIterator = invoice.getPayments().iterator();
         while (paymentIterator.hasNext()) {
             final InvoicePayment cur = paymentIterator.next();
             latestPaymentDate = latestPaymentDate != null && latestPaymentDate.isAfter(cur.getPaymentDate()) ?
@@ -246,16 +274,16 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
         }
         try {
             final CurrencyConversion conversion = currencyConversionApi.getCurrencyConversion(currency, latestPaymentDate);
-            for (Rate rate : conversion.getRates()) {
+            for (final Rate rate : conversion.getRates()) {
                 if (rate.getCurrency() == getCurrency()) {
                     return rate.getValue().toString();
                 }
             }
-        } catch (CurrencyConversionException e) {
-            logger.warn("Failed to retrieve currency conversion rates for currency = " + currency + " and date = " + latestPaymentDate, e);
+        } catch (final CurrencyConversionException e) {
+            logger.warn("Failed to retrieve currency conversion rates for currency='{}', dateConversion='{}'", currency, latestPaymentDate, e);
             return null;
         }
-        logger.warn("Failed to retrieve currency conversion rates for currency = " + currency + " and date = " + latestPaymentDate);
+        logger.warn("Failed to retrieve currency conversion rates for currency='{}', dateConversion='{}'", currency, latestPaymentDate);
         return null;
     }
 
@@ -281,7 +309,7 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
     @Override
     public BigDecimal getPaidAmount() {
-        return round(Objects.firstNonNull(invoice.getPaidAmount(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(invoice.getPaidAmount(), BigDecimal.ZERO);
     }
 
     @Override
@@ -309,6 +337,16 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
         return invoice.getUpdatedDate();
     }
 
+    @Override
+    public InvoiceStatus getStatus() {
+        return invoice.getStatus();
+    }
+
+    @Override
+    public boolean isParentInvoice() {
+        return invoice.isParentInvoice();
+    }
+
     // Expose the fields for children classes. This is useful for further customization of the invoices
 
     @SuppressWarnings("UnusedDeclaration")
@@ -332,11 +370,11 @@ public class DefaultInvoiceFormatter implements InvoiceFormatter {
 
     @Override
     public BigDecimal getCreditedAmount() {
-        return round(Objects.firstNonNull(invoice.getCreditedAmount(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(invoice.getCreditedAmount(), BigDecimal.ZERO);
     }
 
     @Override
     public BigDecimal getRefundedAmount() {
-        return round(Objects.firstNonNull(invoice.getRefundedAmount(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(invoice.getRefundedAmount(), BigDecimal.ZERO);
     }
 }

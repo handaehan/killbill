@@ -37,8 +37,8 @@ public class TestEventJson extends AccountTestSuiteNoDB {
     @Test(groups = "fast", description="Test Account event deserialization")
     public void testDefaultAccountChangeEvent() throws Exception {
         final List<ChangedField> changes = new ArrayList<ChangedField>();
-        changes.add(new DefaultChangedField("fieldXX", "valueX", "valueXXX"));
-        changes.add(new DefaultChangedField("fieldYY", "valueY", "valueYYY"));
+        changes.add(new DefaultChangedField("fieldXX", "valueX", "valueXXX", clock.getUTCNow()));
+        changes.add(new DefaultChangedField("fieldYY", "valueY", "valueYYY", clock.getUTCNow()));
         final AccountChangeInternalEvent e = new DefaultAccountChangeEvent(changes, UUID.randomUUID(), 1L, 2L, null);
 
         final String json = mapper.writeValueAsString(e);
@@ -50,8 +50,8 @@ public class TestEventJson extends AccountTestSuiteNoDB {
 
     @Test(groups = "fast", description="Test Account event serialization")
     public void testAccountCreationEvent() throws Exception {
-        final DefaultAccountData data = new DefaultAccountData("dsfdsf", "bobo", 3, "bobo@yahoo.com", 12, "USD", UUID.randomUUID(),
-                                                               "UTC", "US", "21 avenue", "", "Gling", "San Franciso", "CA", "94110", "USA", "4126789887", false, false);
+        final DefaultAccountData data = new DefaultAccountData("dsfdsf", "bobo", 3, "bobo@yahoo.com", 12, "USD", null, false, UUID.randomUUID(),
+                                                               "UTC", "US", "21 avenue", "", "Gling", "San Franciso", "CA", "94110", "USA", "4126789887", "notes", false, false);
         final DefaultAccountCreationEvent e = new DefaultAccountCreationEvent(data, UUID.randomUUID(), 1L, 2L, null);
         final String json = mapper.writeValueAsString(e);
 

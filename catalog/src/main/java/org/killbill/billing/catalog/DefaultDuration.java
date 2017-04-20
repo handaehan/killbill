@@ -16,26 +16,32 @@
 
 package org.killbill.billing.catalog;
 
+import java.net.URI;
+
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
 
 import org.joda.time.DateTime;
+import org.joda.time.LocalDate;
 import org.joda.time.Period;
 
+import org.killbill.billing.ErrorCode;
+import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Duration;
 import org.killbill.billing.catalog.api.TimeUnit;
-import org.killbill.billing.util.config.catalog.ValidatingConfig;
-import org.killbill.billing.util.config.catalog.ValidationError;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.xmlloader.ValidatingConfig;
+import org.killbill.xmlloader.ValidationError;
+import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
 public class DefaultDuration extends ValidatingConfig<StandaloneCatalog> implements Duration {
+
     @XmlElement(required = true)
     private TimeUnit unit;
 
     @XmlElement(required = false)
-    private Integer number = -1;
+    private Integer number;
 
     /* (non-Javadoc)
       * @see org.killbill.billing.catalog.IDuration#getUnit()
@@ -53,8 +59,11 @@ public class DefaultDuration extends ValidatingConfig<StandaloneCatalog> impleme
         return number;
     }
 
+    public DefaultDuration() {
+    }
+
     @Override
-    public DateTime addToDateTime(final DateTime dateTime) {
+    public DateTime addToDateTime(final DateTime dateTime) throws CatalogApiException {
         if ((number == null) && (unit != TimeUnit.UNLIMITED)) {
             return dateTime;
         }
@@ -62,35 +71,71 @@ public class DefaultDuration extends ValidatingConfig<StandaloneCatalog> impleme
         switch (unit) {
             case DAYS:
                 return dateTime.plusDays(number);
+            case WEEKS:
+                return dateTime.plusWeeks(number);
             case MONTHS:
                 return dateTime.plusMonths(number);
             case YEARS:
                 return dateTime.plusYears(number);
             case UNLIMITED:
-                return dateTime.plusYears(100);
             default:
-                return dateTime;
+                throw new CatalogApiException(ErrorCode.CAT_UNDEFINED_DURATION, unit);
+        }
+    }
+
+    @Override
+    public LocalDate addToLocalDate(final LocalDate localDate) throws CatalogApiException {
+        if ((number == null) && (unit != TimeUnit.UNLIMITED)) {
+            return localDate;
+        }
+
+        switch (unit) {
+            case DAYS:
+                return localDate.plusDays(number);
+            case WEEKS:
+                return localDate.plusWeeks(number);
+            case MONTHS:
+                return localDate.plusMonths(number);
+            case YEARS:
+                return localDate.plusYears(number);
+            case UNLIMITED:
+            default:
+                throw new CatalogApiException(ErrorCode.CAT_UNDEFINED_DURATION, unit);
         }
     }
 
     @Override
     public ValidationErrors validate(final StandaloneCatalog catalog, final ValidationErrors errors) {
-        //Validation: TimeUnit UNLIMITED iff number == -1
-        if ((unit == TimeUnit.UNLIMITED && number != -1)) {
-            errors.add(new ValidationError("Duration can only have 'UNLIMITED' unit if the number is omitted.",
-                                           catalog.getCatalogURI(), DefaultPlanPhase.class, ""));
+
+        // Safety check
+        if (number == null) {
+            throw new IllegalStateException("number should have been automatically been initialized with DEFAULT_NON_REQUIRED_INTEGER_FIELD_VALUE ");
         }
 
-        //TODO MDW - Validation TimeUnit UNLIMITED iff number == -1
+        //Validation: TimeUnit UNLIMITED if number == -1
+        if ((unit == TimeUnit.UNLIMITED && !CatalogSafetyInitializer.DEFAULT_NON_REQUIRED_INTEGER_FIELD_VALUE.equals(number))) {
+            errors.add(new ValidationError("Duration can only have 'UNLIMITED' unit if the number is omitted",
+                                           catalog.getCatalogURI(), DefaultDuration.class, ""));
+        } else if ((unit != TimeUnit.UNLIMITED) && CatalogSafetyInitializer.DEFAULT_NON_REQUIRED_INTEGER_FIELD_VALUE.equals(number)) {
+            errors.add(new ValidationError("Finite Duration must have a well defined length",
+                                           catalog.getCatalogURI(), DefaultDuration.class, ""));
+        }
         return errors;
     }
 
-    protected DefaultDuration setUnit(final TimeUnit unit) {
+    @Override
+    public void initialize(final StandaloneCatalog root, final URI uri) {
+        super.initialize(root, uri);
+        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+    }
+
+
+    public DefaultDuration setUnit(final TimeUnit unit) {
         this.unit = unit;
         return this;
     }
 
-    protected DefaultDuration setNumber(final Integer number) {
+    public DefaultDuration setNumber(final Integer number) {
         this.number = number;
         return this;
     }
@@ -104,14 +149,43 @@ public class DefaultDuration extends ValidatingConfig<StandaloneCatalog> impleme
         switch (unit) {
             case DAYS:
                 return new Period().withDays(number);
+            case WEEKS:
+                return new Period().withWeeks(number);
             case MONTHS:
                 return new Period().withMonths(number);
             case YEARS:
                 return new Period().withYears(number);
             case UNLIMITED:
-                return new Period().withYears(100);
             default:
-                return new Period();
+                throw new  IllegalStateException("Unexpected duration unit " + unit);
         }
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof DefaultDuration)) {
+            return false;
+        }
+
+        final DefaultDuration that = (DefaultDuration) o;
+
+        if (number != null ? !number.equals(that.number) : that.number != null) {
+            return false;
+        }
+        if (unit != that.unit) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = unit != null ? unit.hashCode() : 0;
+        result = 31 * result + (number != null ? number.hashCode() : 0);
+        return result;
     }
 }

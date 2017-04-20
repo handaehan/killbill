@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -18,27 +20,27 @@ package org.killbill.billing.invoice.dao;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import javax.annotation.Nullable;
-
-import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
-
-import org.killbill.bus.api.PersistentBus;
+import org.killbill.billing.account.api.Account;
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.invoice.InvoiceDispatcher.FutureAccountNotifications;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
+import org.killbill.billing.invoice.api.InvoiceStatus;
 import org.killbill.billing.invoice.api.user.DefaultInvoiceCreationEvent;
 import org.killbill.billing.util.entity.DefaultPagination;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.entity.dao.MockEntityDaoBase;
+import org.killbill.bus.api.PersistentBus;
 
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
@@ -59,25 +61,49 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     }
 
     @Override
-    public void createInvoice(final InvoiceModelDao invoice, final List<InvoiceItemModelDao> invoiceItems,
-                              final List<InvoicePaymentModelDao> invoicePayments, final boolean isRealInvoice, final Map<UUID, DateTime> callbackDateTimePerSubscriptions, final InternalCallContext context) {
+    public void createInvoice(final InvoiceModelDao invoice,
+                              final FutureAccountNotifications callbackDateTimePerSubscriptions, final InternalCallContext context) {
         synchronized (monitor) {
-            invoices.put(invoice.getId(), invoice);
-            for (final InvoiceItemModelDao invoiceItemModelDao : invoiceItems) {
-                items.put(invoiceItemModelDao.getId(), invoiceItemModelDao);
-            }
-            for (final InvoicePaymentModelDao paymentModelDao : invoicePayments) {
-                payments.put(paymentModelDao.getId(), paymentModelDao);
-            }
-            accountRecordIds.put(invoice.getAccountId(), context.getAccountRecordId());
+            storeInvoice(invoice, context);
         }
         try {
             eventBus.post(new DefaultInvoiceCreationEvent(invoice.getId(), invoice.getAccountId(),
                                                           InvoiceModelDaoHelper.getBalance(invoice), invoice.getCurrency(),
                                                           context.getAccountRecordId(), context.getTenantRecordId(), context.getUserToken()));
-        } catch (PersistentBus.EventBusException ex) {
+        } catch (final PersistentBus.EventBusException ex) {
             throw new RuntimeException(ex);
         }
+    }
+
+    @Override
+    public void setFutureAccountNotificationsForEmptyInvoice(final UUID accountId, final FutureAccountNotifications callbackDateTimePerSubscriptions, final InternalCallContext context) {
+
+    }
+
+    @Override
+    public List<InvoiceItemModelDao> createInvoices(final List<InvoiceModelDao> invoiceModelDaos, final InternalCallContext context) {
+        synchronized (monitor) {
+            final List<InvoiceItemModelDao> createdItems = new LinkedList<InvoiceItemModelDao>();
+            for (final InvoiceModelDao invoice : invoiceModelDaos) {
+                createdItems.addAll(storeInvoice(invoice, context));
+            }
+            return createdItems;
+        }
+    }
+
+    private Collection<InvoiceItemModelDao> storeInvoice(final InvoiceModelDao invoice, final InternalCallContext context) {
+        final Collection<InvoiceItemModelDao> createdItems = new LinkedList<InvoiceItemModelDao>();
+
+        invoices.put(invoice.getId(), invoice);
+        for (final InvoiceItemModelDao invoiceItemModelDao : invoice.getInvoiceItems()) {
+            final InvoiceItemModelDao oldItemOrNull = items.put(invoiceItemModelDao.getId(), invoiceItemModelDao);
+            if (oldItemOrNull == null) {
+                createdItems.add(invoiceItemModelDao);
+            }
+        }
+        accountRecordIds.put(invoice.getAccountId(), context.getAccountRecordId());
+
+        return createdItems;
     }
 
     @Override
@@ -125,7 +151,6 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     @Override
     public List<InvoiceModelDao> getInvoicesByAccount(final LocalDate fromDate, final InternalTenantContext context) {
         final List<InvoiceModelDao> invoicesForAccount = new ArrayList<InvoiceModelDao>();
-
         synchronized (monitor) {
             final UUID accountId = accountRecordIds.inverse().get(context.getAccountRecordId());
             for (final InvoiceModelDao invoice : getAll(context)) {
@@ -158,7 +183,9 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     @Override
     public Pagination<InvoiceModelDao> searchInvoices(final String searchKey, final Long offset, final Long limit, final InternalTenantContext context) {
         final List<InvoiceModelDao> results = new LinkedList<InvoiceModelDao>();
+        int maxNbRecords = 0;
         for (final InvoiceModelDao invoice : getAll(context)) {
+            maxNbRecords++;
             if (invoice.getId().toString().equals(searchKey) ||
                 invoice.getAccountId().toString().equals(searchKey) ||
                 invoice.getInvoiceNumber().toString().equals(searchKey) ||
@@ -167,7 +194,7 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
             }
         }
 
-        return DefaultPagination.<InvoiceModelDao>build(offset, limit, results);
+        return DefaultPagination.<InvoiceModelDao>build(offset, limit, maxNbRecords, results);
     }
 
     @Override
@@ -187,7 +214,7 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     }
 
     @Override
-    public List<InvoicePaymentModelDao> getInvoicePayments(final UUID paymentId, final InternalTenantContext context) {
+    public List<InvoicePaymentModelDao> getInvoicePaymentsByPaymentId(final UUID paymentId, final InternalTenantContext context) {
         final List<InvoicePaymentModelDao> result = new LinkedList<InvoicePaymentModelDao>();
         synchronized (monitor) {
             for (final InvoicePaymentModelDao payment : payments.values()) {
@@ -200,7 +227,24 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     }
 
     @Override
-    public void notifyOfPayment(final InvoicePaymentModelDao invoicePayment, final InternalCallContext context) {
+    public List<InvoicePaymentModelDao> getInvoicePaymentsByAccount(final InternalTenantContext context) {
+
+        throw new UnsupportedOperationException();
+/*
+        InvoicePaymentModelDao does not export accountId ?
+
+        final List<InvoicePaymentModelDao> invoicesForAccount = new ArrayList<InvoicePaymentModelDao>();
+        synchronized (monitor) {
+            final UUID accountId = accountRecordIds.inverse().get(context.getAccountRecordId());
+            for (final InvoicePaymentModelDao payment : payments.values()) {
+            }
+        }
+        return null;
+*/
+    }
+
+    @Override
+    public void notifyOfPaymentCompletion(final InvoicePaymentModelDao invoicePayment, final InternalCallContext context) {
         synchronized (monitor) {
             payments.put(invoicePayment.getId(), invoicePayment);
         }
@@ -252,7 +296,23 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     }
 
     @Override
-    public InvoicePaymentModelDao postChargeback(final UUID invoicePaymentId, final BigDecimal amount, final InternalCallContext context) throws InvoiceApiException {
+    public InvoicePaymentModelDao postChargeback(final UUID invoicePaymentId, final String chargebackTransactionExternalKey, final BigDecimal amount, final Currency currency, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InvoicePaymentModelDao postChargebackReversal(final UUID paymentId, final String chargebackTransactionExternalKey, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InvoiceItemModelDao doCBAComplexity(final InvoiceModelDao invoice, final InternalCallContext context) throws InvoiceApiException {
+        // Do nothing unless we need it..
+        return null;
+    }
+
+    @Override
+    public Map<UUID, BigDecimal> computeItemAdjustments(final String invoiceId, final Map<UUID, BigDecimal> invoiceItemIdsWithNullAmounts, final InternalTenantContext context) throws InvoiceApiException {
         throw new UnsupportedOperationException();
     }
 
@@ -287,27 +347,7 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
     }
 
     @Override
-    public InvoiceItemModelDao insertExternalCharge(final UUID accountId, @Nullable final UUID invoiceId, @Nullable final UUID bundleId,
-                                                    @Nullable final String description, final BigDecimal amount, final LocalDate effectiveDate,
-                                                    final Currency currency, final InternalCallContext context) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public InvoiceItemModelDao getCreditById(final UUID creditId, final InternalTenantContext context) throws InvoiceApiException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public InvoiceItemModelDao insertCredit(final UUID accountId, final UUID invoiceId, final BigDecimal amount, final LocalDate effectiveDate,
-                                            final Currency currency, final InternalCallContext context) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public InvoiceItemModelDao insertInvoiceItemAdjustment(final UUID accountId, final UUID invoiceId, final UUID invoiceItemId,
-                                                           final LocalDate effectiveDate, @Nullable final BigDecimal amount,
-                                                           @Nullable final Currency currency, final InternalCallContext context) {
         throw new UnsupportedOperationException();
     }
 
@@ -318,7 +358,7 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
 
     @Override
     public InvoicePaymentModelDao createRefund(final UUID paymentId, final BigDecimal amount, final boolean isInvoiceAdjusted,
-                                               final Map<UUID, BigDecimal> invoiceItemIdsWithAmounts, final UUID paymentCookieId,
+                                               final Map<UUID, BigDecimal> invoiceItemIdsWithAmounts, final String transactionExternalKey,
                                                final InternalCallContext context)
             throws InvoiceApiException {
         return null;
@@ -326,6 +366,48 @@ public class MockInvoiceDao extends MockEntityDaoBase<InvoiceModelDao, Invoice, 
 
     @Override
     public void deleteCBA(final UUID accountId, final UUID invoiceId, final UUID invoiceItemId, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void notifyOfPaymentInit(final InvoicePaymentModelDao invoicePayment, final InternalCallContext context) {
+        synchronized (monitor) {
+            payments.put(invoicePayment.getId(), invoicePayment);
+        }
+
+    }
+
+    @Override
+    public void changeInvoiceStatus(final UUID invoiceId, final InvoiceStatus newState, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createParentChildInvoiceRelation(final InvoiceParentChildModelDao invoiceRelation, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InvoiceModelDao getParentDraftInvoice(final UUID parentAccountId, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<InvoiceParentChildModelDao> getChildInvoicesByParentInvoiceId(final UUID parentInvoiceId, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    public void updateInvoiceItemAmount(final UUID invoiceItemId, final BigDecimal amount, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void transferChildCreditToParent(final Account childAccount, final InternalCallContext context) throws InvoiceApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<InvoiceItemModelDao> getInvoiceItemsByParentInvoice(final UUID parentInvoiceId, final InternalTenantContext context) throws InvoiceApiException {
         throw new UnsupportedOperationException();
     }
 }

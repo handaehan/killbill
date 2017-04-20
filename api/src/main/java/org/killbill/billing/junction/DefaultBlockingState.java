@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2012 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,20 +21,15 @@ package org.killbill.billing.junction;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-
-import org.killbill.clock.Clock;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
 import org.killbill.billing.entity.EntityBase;
-
+import org.killbill.billing.util.UUIDs;
 
 public class DefaultBlockingState extends EntityBase implements BlockingState {
 
-    public static final String CLEAR_STATE_NAME = "__KILLBILL__CLEAR__OVERDUE_STATE__";
 
-    private static BlockingState clearState = null;
-
-    private final UUID blockingId;
+    private final UUID blockedId;
     private final String stateName;
     private final String service;
     private final boolean blockChange;
@@ -40,17 +37,11 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
     private final boolean blockBilling;
     private final DateTime effectiveDate;
     private final BlockingStateType type;
+    private final Long totalOrdering;
 
-    public static BlockingState getClearState(final BlockingStateType type, final String serviceName, final Clock clock) {
-        if (clearState == null) {
-            clearState = new DefaultBlockingState(null, type, CLEAR_STATE_NAME, serviceName, false, false, false, clock.getUTCNow());
-        }
-        return clearState;
-    }
-
-
+    // Used by the DAO
     public DefaultBlockingState(final UUID id,
-                                final UUID blockingId,
+                                final UUID blockedId,
                                 final BlockingStateType type,
                                 final String stateName,
                                 final String service,
@@ -59,9 +50,10 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
                                 final boolean blockBilling,
                                 final DateTime effectiveDate,
                                 final DateTime createDate,
-                                final DateTime updatedDate) {
+                                final DateTime updatedDate,
+                                final Long totalOrdering) {
         super(id, createDate, updatedDate);
-        this.blockingId = blockingId;
+        this.blockedId = blockedId;
         this.type = type;
         this.stateName = stateName;
         this.service = service;
@@ -69,19 +61,19 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
         this.blockEntitlement = blockEntitlement;
         this.blockBilling = blockBilling;
         this.effectiveDate = effectiveDate;
+        this.totalOrdering = totalOrdering;
     }
 
-
-    public DefaultBlockingState(final UUID blockingId,
+    public DefaultBlockingState(final UUID blockedId,
                                 final BlockingStateType type,
-                                 final String stateName,
-                                 final String service,
-                                 final boolean blockChange,
-                                 final boolean blockEntitlement,
-                                 final boolean blockBilling,
-                                 final DateTime effectiveDate) {
-        this(UUID.randomUUID(),
-             blockingId,
+                                final String stateName,
+                                final String service,
+                                final boolean blockChange,
+                                final boolean blockEntitlement,
+                                final boolean blockBilling,
+                                final DateTime effectiveDate) {
+        this(UUIDs.randomUUID(),
+             blockedId,
              type,
              stateName,
              service,
@@ -90,17 +82,27 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
              blockBilling,
              effectiveDate,
              null,
-             null);
+             null,
+             0L);
+    }
+
+    public DefaultBlockingState(final BlockingState input,
+                                final DateTime effectiveDate) {
+        this(input.getBlockedId(),
+             input.getType(),
+             input.getStateName(),
+             input.getService(),
+             input.isBlockChange(),
+             input.isBlockEntitlement(),
+             input.isBlockBilling(),
+             effectiveDate);
     }
 
     @Override
     public UUID getBlockedId() {
-        return blockingId;
+        return blockedId;
     }
 
-    /* (non-Javadoc)
-    * @see org.killbill.billing.junction.api.blocking.BlockingState#getStateName()
-    */
     @Override
     public String getStateName() {
         return stateName;
@@ -111,9 +113,6 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
         return type;
     }
 
-    /* (non-Javadoc)
-    * @see org.killbill.billing.junction.api.blocking.BlockingState#getTimestamp()
-    */
     @Override
     public DateTime getEffectiveDate() {
         return effectiveDate;
@@ -124,111 +123,114 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
         return service;
     }
 
-    /* (non-Javadoc)
-     * @see org.killbill.billing.junction.api.blocking.BlockingState#isBlockChange()
-     */
     @Override
     public boolean isBlockChange() {
         return blockChange;
     }
 
-    /* (non-Javadoc)
-     * @see org.killbill.billing.junction.api.blocking.BlockingState#isBlockEntitlement()
-     */
     @Override
     public boolean isBlockEntitlement() {
         return blockEntitlement;
     }
 
-    /* (non-Javadoc)
-     * @see org.killbill.billing.junction.api.blocking.BlockingState#isBlockBilling()
-     */
     @Override
     public boolean isBlockBilling() {
         return blockBilling;
     }
 
-    /* (non-Javadoc)
-     * @see org.killbill.billing.junction.api.blocking.BlockingState#compareTo(org.killbill.billing.junction.api.blocking.DefaultBlockingState)
-     */
+    public Long getTotalOrdering() {
+        return totalOrdering;
+    }
+
+    // Notes:
+    //  + we need to keep the same implementation here as DefaultBlockingStateDao.BLOCKING_STATE_MODEL_DAO_ORDERING
+    //  + to sort blocking states in entitlement, check ProxyBlockingStateDao#sortedCopy
     @Override
     public int compareTo(final BlockingState arg0) {
-        if (effectiveDate.compareTo(arg0.getEffectiveDate()) != 0) {
-            return effectiveDate.compareTo(arg0.getEffectiveDate());
+        // effective_date column NOT NULL
+        final int comparison = effectiveDate.compareTo(arg0.getEffectiveDate());
+        if (comparison == 0) {
+            // Keep a stable ordering for ties
+            final int comparison2 = createdDate.compareTo(arg0.getCreatedDate());
+            if (comparison2 == 0 && arg0 instanceof DefaultBlockingState) {
+                final DefaultBlockingState other = (DefaultBlockingState) arg0;
+                // New element is last
+                if (totalOrdering == null) {
+                    return 1;
+                } else if (other.getTotalOrdering() == null) {
+                    return -1;
+                } else {
+                    return totalOrdering.compareTo(other.getTotalOrdering());
+                }
+            } else {
+                return comparison2;
+            }
         } else {
-            return hashCode() - arg0.hashCode();
+            return comparison;
         }
     }
 
     @Override
-    public int hashCode() {
-        final int prime = 31;
-        int result = 1;
-        result = prime * result + (blockBilling ? 1231 : 1237);
-        result = prime * result + (blockChange ? 1231 : 1237);
-        result = prime * result + (blockEntitlement ? 1231 : 1237);
-        result = prime * result + ((blockingId == null) ? 0 : blockingId.hashCode());
-        result = prime * result + ((service == null) ? 0 : service.hashCode());
-        result = prime * result + ((stateName == null) ? 0 : stateName.hashCode());
-        result = prime * result + ((effectiveDate == null) ? 0 : effectiveDate.hashCode());
-        return result;
-    }
-
-    @Override
-    public boolean equals(final Object obj) {
-        if (this == obj) {
+    public boolean equals(final Object o) {
+        if (this == o) {
             return true;
         }
-        if (obj == null) {
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        if (getClass() != obj.getClass()) {
+        if (!super.equals(o)) {
             return false;
         }
-        final DefaultBlockingState other = (DefaultBlockingState) obj;
-        if (blockBilling != other.blockBilling) {
+
+        final DefaultBlockingState that = (DefaultBlockingState) o;
+
+        if (blockBilling != that.blockBilling) {
             return false;
         }
-        if (blockChange != other.blockChange) {
+        if (blockChange != that.blockChange) {
             return false;
         }
-        if (blockEntitlement != other.blockEntitlement) {
+        if (blockEntitlement != that.blockEntitlement) {
             return false;
         }
-        if (blockingId == null) {
-            if (other.blockingId != null) {
-                return false;
-            }
-        } else if (!blockingId.equals(other.blockingId)) {
+        if (blockedId != null ? !blockedId.equals(that.blockedId) : that.blockedId != null) {
             return false;
         }
-        if (service == null) {
-            if (other.service != null) {
-                return false;
-            }
-        } else if (!service.equals(other.service)) {
+        if (effectiveDate != null ? effectiveDate.compareTo(that.effectiveDate) != 0 : that.effectiveDate != null) {
             return false;
         }
-        if (stateName == null) {
-            if (other.stateName != null) {
-                return false;
-            }
-        } else if (!stateName.equals(other.stateName)) {
+        if (service != null ? !service.equals(that.service) : that.service != null) {
             return false;
         }
-        if (effectiveDate == null) {
-            if (other.effectiveDate != null) {
-                return false;
-            }
-        } else if (effectiveDate.compareTo(other.effectiveDate) != 0) {
+        if (stateName != null ? !stateName.equals(that.stateName) : that.stateName != null) {
             return false;
         }
+        if (totalOrdering != null ? !totalOrdering.equals(that.totalOrdering) : that.totalOrdering != null) {
+            return false;
+        }
+        if (type != that.type) {
+            return false;
+        }
+
         return true;
     }
 
-    /* (non-Javadoc)
-    * @see org.killbill.billing.junction.api.blocking.BlockingState#getDescription()
-    */
+
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + (blockedId != null ? blockedId.hashCode() : 0);
+        result = 31 * result + (stateName != null ? stateName.hashCode() : 0);
+        result = 31 * result + (service != null ? service.hashCode() : 0);
+        result = 31 * result + (blockChange ? 1 : 0);
+        result = 31 * result + (blockEntitlement ? 1 : 0);
+        result = 31 * result + (blockBilling ? 1 : 0);
+        result = 31 * result + (effectiveDate != null ? effectiveDate.hashCode() : 0);
+        result = 31 * result + (type != null ? type.hashCode() : 0);
+        result = 31 * result + (totalOrdering != null ? totalOrdering.hashCode() : 0);
+        return result;
+    }
+
     @Override
     public String getDescription() {
         final String entitlement = onOff(isBlockEntitlement());
@@ -248,8 +250,8 @@ public class DefaultBlockingState extends EntityBase implements BlockingState {
 
     @Override
     public String toString() {
-        return "BlockingState [blockingId=" + blockingId + ", stateName=" + stateName + ", service="
-                + service + ", blockChange=" + blockChange + ", blockEntitlement=" + blockEntitlement
-                + ", blockBilling=" + blockBilling + ", effectiveDate=" + effectiveDate + "]";
+        return "BlockingState [blockedId=" + blockedId + ", stateName=" + stateName + ", service="
+               + service + ", blockChange=" + blockChange + ", blockEntitlement=" + blockEntitlement
+               + ", blockBilling=" + blockBilling + ", effectiveDate=" + effectiveDate + "]";
     }
 }

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -23,24 +25,25 @@ import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlID;
 
 import org.joda.time.Period;
-
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.catalog.api.TimeUnit;
-import org.killbill.billing.overdue.EmailNotification;
-import org.killbill.billing.overdue.OverdueApiException;
-import org.killbill.billing.overdue.OverdueCancellationPolicy;
-import org.killbill.billing.overdue.OverdueState;
-import org.killbill.billing.util.config.catalog.ValidatingConfig;
-import org.killbill.billing.util.config.catalog.ValidationError;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.billing.overdue.ConditionEvaluation;
+import org.killbill.billing.overdue.api.EmailNotification;
+import org.killbill.billing.overdue.api.OverdueApiException;
+import org.killbill.billing.overdue.api.OverdueCancellationPolicy;
+import org.killbill.billing.overdue.api.OverdueCondition;
+import org.killbill.billing.overdue.api.OverdueState;
+import org.killbill.xmlloader.ValidatingConfig;
+import org.killbill.xmlloader.ValidationError;
+import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
-public class DefaultOverdueState extends ValidatingConfig<OverdueConfig> implements OverdueState {
+public class DefaultOverdueState extends ValidatingConfig<DefaultOverdueConfig> implements OverdueState {
 
     private static final int MAX_NAME_LENGTH = 50;
 
     @XmlElement(required = false, name = "condition")
-    private DefaultCondition condition;
+    private DefaultOverdueCondition condition;
 
     @XmlAttribute(required = true, name = "name")
     @XmlID
@@ -74,6 +77,15 @@ public class DefaultOverdueState extends ValidatingConfig<OverdueConfig> impleme
     // - set payment retry interval
     // - backup payment mechanism?
 
+    public ConditionEvaluation getConditionEvaluation() {
+        return condition;
+    }
+
+    @Override
+    public OverdueCondition getOverdueCondition() {
+        return condition;
+    }
+
     @Override
     public String getName() {
         return name;
@@ -85,49 +97,48 @@ public class DefaultOverdueState extends ValidatingConfig<OverdueConfig> impleme
     }
 
     @Override
-    public boolean blockChanges() {
-        return blockChanges || disableEntitlement;
+    public boolean isBlockChanges() {
+        return blockChanges;
     }
 
     @Override
-    public boolean disableEntitlementAndChangesBlocked() {
+    public boolean isDisableEntitlementAndChangesBlocked() {
         return disableEntitlement;
     }
 
     @Override
-    public OverdueCancellationPolicy getSubscriptionCancellationPolicy() {
+    public OverdueCancellationPolicy getOverdueCancellationPolicy() {
         return subscriptionCancellationPolicy;
     }
 
     @Override
-    public Period getReevaluationInterval() throws OverdueApiException {
+    public Period getAutoReevaluationInterval() throws OverdueApiException {
         if (autoReevaluationInterval == null || autoReevaluationInterval.getUnit() == TimeUnit.UNLIMITED || autoReevaluationInterval.getNumber() == 0) {
             throw new OverdueApiException(ErrorCode.OVERDUE_NO_REEVALUATION_INTERVAL, name);
         }
         return autoReevaluationInterval.toJodaPeriod();
     }
 
-    @Override
-    public DefaultCondition getCondition() {
-        return condition;
+    public void setAutoReevaluationInterval(final DefaultDuration autoReevaluationInterval) {
+        this.autoReevaluationInterval = autoReevaluationInterval;
     }
 
-    protected DefaultOverdueState setName(final String name) {
+    public DefaultOverdueState setName(final String name) {
         this.name = name;
         return this;
     }
 
-    protected DefaultOverdueState setClearState(final boolean isClearState) {
+    public DefaultOverdueState setClearState(final boolean isClearState) {
         this.isClearState = isClearState;
         return this;
     }
 
-    protected DefaultOverdueState setExternalMessage(final String externalMessage) {
+    public DefaultOverdueState setExternalMessage(final String externalMessage) {
         this.externalMessage = externalMessage;
         return this;
     }
 
-    protected DefaultOverdueState setDisableEntitlement(final boolean cancel) {
+    public DefaultOverdueState setDisableEntitlement(final boolean cancel) {
         this.disableEntitlement = cancel;
         return this;
     }
@@ -137,12 +148,12 @@ public class DefaultOverdueState extends ValidatingConfig<OverdueConfig> impleme
         return this;
     }
 
-    protected DefaultOverdueState setBlockChanges(final boolean cancel) {
+    public DefaultOverdueState setBlockChanges(final boolean cancel) {
         this.blockChanges = cancel;
         return this;
     }
 
-    protected DefaultOverdueState setCondition(final DefaultCondition condition) {
+    public DefaultOverdueState setCondition(final DefaultOverdueCondition condition) {
         this.condition = condition;
         return this;
     }
@@ -152,8 +163,9 @@ public class DefaultOverdueState extends ValidatingConfig<OverdueConfig> impleme
         return isClearState;
     }
 
+
     @Override
-    public ValidationErrors validate(final OverdueConfig root,
+    public ValidationErrors validate(final DefaultOverdueConfig root,
                                      final ValidationErrors errors) {
         if (name.length() > MAX_NAME_LENGTH) {
             errors.add(new ValidationError(String.format("Name of state '%s' exceeds the maximum length of %d", name, MAX_NAME_LENGTH), root.getURI(), DefaultOverdueState.class, name));
@@ -162,12 +174,23 @@ public class DefaultOverdueState extends ValidatingConfig<OverdueConfig> impleme
     }
 
     @Override
-    public int getDaysBetweenPaymentRetries() {
-        return 8;
+    public EmailNotification getEmailNotification() {
+        return enterStateEmailNotification;
     }
 
     @Override
-    public EmailNotification getEnterStateEmailNotification() {
-        return enterStateEmailNotification;
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("DefaultOverdueState{");
+        sb.append("condition=").append(condition);
+        sb.append(", name='").append(name).append('\'');
+        sb.append(", externalMessage='").append(externalMessage).append('\'');
+        sb.append(", blockChanges=").append(blockChanges);
+        sb.append(", disableEntitlement=").append(disableEntitlement);
+        sb.append(", subscriptionCancellationPolicy=").append(subscriptionCancellationPolicy);
+        sb.append(", isClearState=").append(isClearState);
+        sb.append(", autoReevaluationInterval=").append(autoReevaluationInterval);
+        sb.append(", enterStateEmailNotification=").append(enterStateEmailNotification);
+        sb.append('}');
+        return sb.toString();
     }
 }

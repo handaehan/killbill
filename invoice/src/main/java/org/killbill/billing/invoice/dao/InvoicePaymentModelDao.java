@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -27,8 +29,9 @@ import org.killbill.billing.invoice.api.InvoicePaymentType;
 import org.killbill.billing.util.dao.TableName;
 import org.killbill.billing.entity.EntityBase;
 import org.killbill.billing.util.entity.dao.EntityModelDao;
+import org.killbill.billing.util.entity.dao.EntityModelDaoBase;
 
-public class InvoicePaymentModelDao extends EntityBase implements EntityModelDao<InvoicePayment> {
+public class InvoicePaymentModelDao extends EntityModelDaoBase implements EntityModelDao<InvoicePayment> {
 
     private InvoicePaymentType type;
     private UUID invoiceId;
@@ -37,14 +40,15 @@ public class InvoicePaymentModelDao extends EntityBase implements EntityModelDao
     private BigDecimal amount;
     private Currency currency;
     private Currency processedCurrency;
-    private UUID paymentCookieId;
+    private String paymentCookieId;
     private UUID linkedInvoicePaymentId;
+    private Boolean success;
 
     public InvoicePaymentModelDao() { /* For the DAO mapper */ }
 
     public InvoicePaymentModelDao(final UUID id, final DateTime createdDate, final InvoicePaymentType type, final UUID invoiceId,
                                   final UUID paymentId, final DateTime paymentDate, final BigDecimal amount, final Currency currency,
-                                  final Currency processedCurrency, final UUID paymentCookieId, final UUID linkedInvoicePaymentId) {
+                                  final Currency processedCurrency, final String paymentCookieId, final UUID linkedInvoicePaymentId, final Boolean success) {
         super(id, createdDate, createdDate);
         this.type = type;
         this.invoiceId = invoiceId;
@@ -55,12 +59,13 @@ public class InvoicePaymentModelDao extends EntityBase implements EntityModelDao
         this.processedCurrency = processedCurrency;
         this.paymentCookieId = paymentCookieId;
         this.linkedInvoicePaymentId = linkedInvoicePaymentId;
+        this.success = success;
     }
 
     public InvoicePaymentModelDao(final InvoicePayment invoicePayment) {
         this(invoicePayment.getId(), invoicePayment.getCreatedDate(), invoicePayment.getType(), invoicePayment.getInvoiceId(), invoicePayment.getPaymentId(),
              invoicePayment.getPaymentDate(), invoicePayment.getAmount(), invoicePayment.getCurrency(), invoicePayment.getProcessedCurrency(), invoicePayment.getPaymentCookieId(),
-             invoicePayment.getLinkedInvoicePaymentId());
+             invoicePayment.getLinkedInvoicePaymentId(), invoicePayment.isSuccess());
     }
 
     public InvoicePaymentType getType() {
@@ -91,7 +96,7 @@ public class InvoicePaymentModelDao extends EntityBase implements EntityModelDao
         return processedCurrency;
     }
 
-    public UUID getPaymentCookieId() {
+    public String getPaymentCookieId() {
         return paymentCookieId;
     }
 
@@ -127,7 +132,7 @@ public class InvoicePaymentModelDao extends EntityBase implements EntityModelDao
         this.processedCurrency = processedCurrency;
     }
 
-    public void setPaymentCookieId(final UUID paymentCookieId) {
+    public void setPaymentCookieId(final String paymentCookieId) {
         this.paymentCookieId = paymentCookieId;
     }
 
@@ -135,18 +140,27 @@ public class InvoicePaymentModelDao extends EntityBase implements EntityModelDao
         this.linkedInvoicePaymentId = linkedInvoicePaymentId;
     }
 
+    public Boolean getSuccess() {
+        return success;
+    }
+
+    public void setSuccess(final Boolean success) {
+        this.success = success;
+    }
+
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("InvoicePaymentModelDao");
-        sb.append("{type=").append(type);
+        final StringBuilder sb = new StringBuilder("InvoicePaymentModelDao{");
+        sb.append("type=").append(type);
         sb.append(", invoiceId=").append(invoiceId);
         sb.append(", paymentId=").append(paymentId);
         sb.append(", paymentDate=").append(paymentDate);
         sb.append(", amount=").append(amount);
         sb.append(", currency=").append(currency);
-        sb.append(", paymentCookieId=").append(paymentCookieId);
+        sb.append(", processedCurrency=").append(processedCurrency);
+        sb.append(", paymentCookieId='").append(paymentCookieId).append('\'');
         sb.append(", linkedInvoicePaymentId=").append(linkedInvoicePaymentId);
+        sb.append(", success=").append(success);
         sb.append('}');
         return sb.toString();
     }

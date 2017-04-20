@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,12 +18,8 @@
 
 package org.killbill.billing.account.dao;
 
+import java.util.List;
 import java.util.UUID;
-
-import org.skife.jdbi.v2.sqlobject.Bind;
-import org.skife.jdbi.v2.sqlobject.BindBean;
-import org.skife.jdbi.v2.sqlobject.SqlQuery;
-import org.skife.jdbi.v2.sqlobject.SqlUpdate;
 
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.callcontext.InternalCallContext;
@@ -30,6 +28,10 @@ import org.killbill.billing.util.audit.ChangeType;
 import org.killbill.billing.util.entity.dao.Audited;
 import org.killbill.billing.util.entity.dao.EntitySqlDao;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoStringTemplate;
+import org.skife.jdbi.v2.sqlobject.Bind;
+import org.skife.jdbi.v2.sqlobject.BindBean;
+import org.skife.jdbi.v2.sqlobject.SqlQuery;
+import org.skife.jdbi.v2.sqlobject.SqlUpdate;
 
 @EntitySqlDaoStringTemplate
 public interface AccountSqlDao extends EntitySqlDao<AccountModelDao, Account> {
@@ -42,6 +44,10 @@ public interface AccountSqlDao extends EntitySqlDao<AccountModelDao, Account> {
     public UUID getIdFromKey(@Bind("externalKey") final String key,
                              @BindBean final InternalTenantContext context);
 
+    @SqlQuery
+    public Integer getBCD(@Bind("id") String accountId,
+                          @BindBean final InternalTenantContext context);
+
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
     public void update(@BindBean final AccountModelDao account,
@@ -49,7 +55,16 @@ public interface AccountSqlDao extends EntitySqlDao<AccountModelDao, Account> {
 
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
-    public void updatePaymentMethod(@Bind("id") String accountId,
-                                    @Bind("paymentMethodId") String paymentMethodId,
-                                    @BindBean final InternalCallContext context);
+    public Object updatePaymentMethod(@Bind("id") String accountId,
+                                      @Bind("paymentMethodId") String paymentMethodId,
+                                      @BindBean final InternalCallContext context);
+
+    @SqlQuery
+    List<AccountModelDao> getAccountsByParentId(@Bind("parentAccountId") UUID parentAccountId,
+                                                @BindBean final InternalTenantContext context);
+
+    @SqlQuery
+    public AccountModelDao luckySearch(@Bind("searchKey") final String searchKey,
+                                       @BindBean final InternalTenantContext context);
+
 }

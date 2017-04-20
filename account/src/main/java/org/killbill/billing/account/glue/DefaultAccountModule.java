@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,26 +18,24 @@
 
 package org.killbill.billing.account.glue;
 
-import org.skife.config.ConfigSource;
-
+import org.killbill.billing.account.api.AccountInternalApi;
 import org.killbill.billing.account.api.AccountService;
 import org.killbill.billing.account.api.AccountUserApi;
 import org.killbill.billing.account.api.DefaultAccountService;
+import org.killbill.billing.account.api.ImmutableAccountInternalApi;
 import org.killbill.billing.account.api.svcs.DefaultAccountInternalApi;
+import org.killbill.billing.account.api.svcs.DefaultImmutableAccountInternalApi;
 import org.killbill.billing.account.api.user.DefaultAccountUserApi;
 import org.killbill.billing.account.dao.AccountDao;
 import org.killbill.billing.account.dao.DefaultAccountDao;
 import org.killbill.billing.glue.AccountModule;
-import org.killbill.billing.account.api.AccountInternalApi;
+import org.killbill.billing.platform.api.KillbillConfigSource;
+import org.killbill.billing.util.glue.KillBillModule;
 
-import com.google.inject.AbstractModule;
+public class DefaultAccountModule extends KillBillModule implements AccountModule {
 
-public class DefaultAccountModule extends AbstractModule implements AccountModule {
-
-    protected final ConfigSource configSource;
-
-    public DefaultAccountModule(final ConfigSource configSource) {
-        this.configSource = configSource;
+    public DefaultAccountModule(final KillbillConfigSource configSource) {
+        super(configSource);
     }
 
     private void installConfig() {
@@ -53,6 +53,7 @@ public class DefaultAccountModule extends AbstractModule implements AccountModul
     @Override
     public void installInternalApi() {
         bind(AccountInternalApi.class).to(DefaultAccountInternalApi.class).asEagerSingleton();
+        bind(ImmutableAccountInternalApi.class).to(DefaultImmutableAccountInternalApi.class).asEagerSingleton();
     }
 
     private void installAccountService() {

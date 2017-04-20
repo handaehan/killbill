@@ -33,6 +33,7 @@ import javax.ws.rs.core.Response;
 
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.account.api.AccountUserApi;
+import org.killbill.billing.payment.api.PaymentApi;
 import org.killbill.clock.Clock;
 import org.killbill.billing.jaxrs.json.TagJson;
 import org.killbill.billing.jaxrs.util.Context;
@@ -46,16 +47,21 @@ import org.killbill.billing.util.callcontext.TenantContext;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.tag.Tag;
 import org.killbill.billing.util.tag.TagDefinition;
+import org.killbill.commons.metrics.TimedResource;
 
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiResponses;
 
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
 @Singleton
 @Path(JaxrsResource.TAGS_PATH)
+@Api(value = JaxrsResource.TAGS_PATH, description = "Operations on tags")
 public class TagResource extends JaxRsResourceBase {
 
     @Inject
@@ -64,14 +70,18 @@ public class TagResource extends JaxRsResourceBase {
                        final CustomFieldUserApi customFieldUserApi,
                        final AuditUserApi auditUserApi,
                        final AccountUserApi accountUserApi,
+                       final PaymentApi paymentApi,
                        final Clock clock,
                        final Context context) {
-        super(uriBuilder, tagUserApi, customFieldUserApi, auditUserApi, accountUserApi, clock, context);
+        super(uriBuilder, tagUserApi, customFieldUserApi, auditUserApi, accountUserApi, paymentApi, null, clock, context);
     }
 
+    @TimedResource
     @GET
     @Path("/" + PAGINATION)
     @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "List tags", response = TagJson.class, responseContainer = "List")
+    @ApiResponses(value = {})
     public Response getTags(@QueryParam(QUERY_SEARCH_OFFSET) @DefaultValue("0") final Long offset,
                             @QueryParam(QUERY_SEARCH_LIMIT) @DefaultValue("100") final Long limit,
                             @QueryParam(QUERY_AUDIT) @DefaultValue("NONE") final AuditMode auditMode,
@@ -99,9 +109,12 @@ public class TagResource extends JaxRsResourceBase {
                                                 nextPageUri);
     }
 
+    @TimedResource
     @GET
     @Path("/" + SEARCH + "/{searchKey:" + ANYTHING_PATTERN + "}")
     @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "Search tags", response = TagJson.class, responseContainer = "List")
+    @ApiResponses(value = {})
     public Response searchTags(@PathParam("searchKey") final String searchKey,
                                @QueryParam(QUERY_SEARCH_OFFSET) @DefaultValue("0") final Long offset,
                                @QueryParam(QUERY_SEARCH_LIMIT) @DefaultValue("100") final Long limit,

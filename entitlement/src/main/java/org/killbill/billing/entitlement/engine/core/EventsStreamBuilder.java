@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -28,19 +30,22 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
-import org.skife.jdbi.v2.IDBI;
-
 import org.killbill.billing.ObjectType;
-import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.account.api.AccountInternalApi;
+import org.killbill.billing.account.api.ImmutableAccountData;
 import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.catalog.api.BillingPeriod;
+import org.killbill.billing.catalog.api.PhaseType;
+import org.killbill.billing.catalog.api.PlanPhase;
+import org.killbill.billing.catalog.api.PlanPhaseSpecifier;
+import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.catalog.api.ProductCategory;
-import org.killbill.clock.Clock;
 import org.killbill.billing.entitlement.AccountEventsStreams;
 import org.killbill.billing.entitlement.EventsStream;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
+import org.killbill.billing.entitlement.api.Entitlement.EntitlementState;
 import org.killbill.billing.entitlement.api.EntitlementApiException;
 import org.killbill.billing.entitlement.api.svcs.DefaultAccountEventsStreams;
 import org.killbill.billing.entitlement.block.BlockingChecker;
@@ -51,12 +56,17 @@ import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseApiException;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
+import org.killbill.billing.subscription.api.user.SubscriptionBaseTransition;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.callcontext.TenantContext;
 import org.killbill.billing.util.dao.NonEntityDao;
+import org.killbill.bus.api.PersistentBus;
+import org.killbill.clock.Clock;
+import org.killbill.notificationq.api.NotificationQueueService;
+import org.skife.jdbi.v2.IDBI;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -75,6 +85,7 @@ public class EventsStreamBuilder {
     @Inject
     public EventsStreamBuilder(final AccountInternalApi accountInternalApi, final SubscriptionBaseInternalApi subscriptionInternalApi,
                                final BlockingChecker checker, final IDBI dbi, final Clock clock,
+                               final NotificationQueueService notificationQueueService, final PersistentBus eventBus,
                                final CacheControllerDispatcher cacheControllerDispatcher,
                                final NonEntityDao nonEntityDao,
                                final InternalCallContextFactory internalCallContextFactory) {
@@ -83,9 +94,8 @@ public class EventsStreamBuilder {
         this.checker = checker;
         this.clock = clock;
         this.internalCallContextFactory = internalCallContextFactory;
-
-        this.defaultBlockingStateDao = new DefaultBlockingStateDao(dbi, clock, cacheControllerDispatcher, nonEntityDao);
-        this.blockingStateDao = new OptimizedProxyBlockingStateDao(this, subscriptionInternalApi, dbi, clock, cacheControllerDispatcher, nonEntityDao);
+        this.defaultBlockingStateDao = new DefaultBlockingStateDao(dbi, clock, notificationQueueService, eventBus, cacheControllerDispatcher, nonEntityDao, internalCallContextFactory);
+        this.blockingStateDao = new OptimizedProxyBlockingStateDao(this, subscriptionInternalApi, dbi, clock, notificationQueueService, eventBus, cacheControllerDispatcher, nonEntityDao, internalCallContextFactory);
     }
 
     public EventsStream refresh(final EventsStream eventsStream, final TenantContext tenantContext) throws EntitlementApiException {
@@ -95,7 +105,7 @@ public class EventsStreamBuilder {
     public EventsStream buildForBaseSubscription(final UUID bundleId, final TenantContext tenantContext) throws EntitlementApiException {
         final SubscriptionBase baseSubscription;
         try {
-            final InternalTenantContext internalTenantContext = internalCallContextFactory.createInternalTenantContext(tenantContext);
+            final InternalTenantContext internalTenantContext = internalCallContextFactory.createInternalTenantContext(bundleId, ObjectType.BUNDLE, tenantContext);
             baseSubscription = subscriptionInternalApi.getBaseSubscription(bundleId, internalTenantContext);
         } catch (SubscriptionBaseApiException e) {
             throw new EntitlementApiException(e);
@@ -111,16 +121,21 @@ public class EventsStreamBuilder {
 
     public AccountEventsStreams buildForAccount(final InternalTenantContext internalTenantContext) throws EntitlementApiException {
         // Retrieve the subscriptions (map bundle id -> subscriptions)
-        final Map<UUID, List<SubscriptionBase>> subscriptions = subscriptionInternalApi.getSubscriptionsForAccount(internalTenantContext);
-        return buildForAccount(subscriptions, internalTenantContext);
+        final Map<UUID, List<SubscriptionBase>> subscriptions;
+        try {
+            subscriptions = subscriptionInternalApi.getSubscriptionsForAccount(internalTenantContext);
+            return buildForAccount(subscriptions, internalTenantContext);
+        } catch (SubscriptionBaseApiException e) {
+            throw new EntitlementApiException(e);
+        }
     }
 
     // Special signature for ProxyBlockingStateDao to save a DAO call
     public AccountEventsStreams buildForAccount(final Map<UUID, List<SubscriptionBase>> subscriptions, final InternalTenantContext internalTenantContext) throws EntitlementApiException {
         // Retrieve the account
-        final Account account;
+        final ImmutableAccountData account;
         try {
-            account = accountInternalApi.getAccountByRecordId(internalTenantContext.getAccountRecordId(), internalTenantContext);
+            account = accountInternalApi.getImmutableAccountDataByRecordId(internalTenantContext.getAccountRecordId(), internalTenantContext);
         } catch (AccountApiException e) {
             throw new EntitlementApiException(e);
         }
@@ -163,25 +178,20 @@ public class EventsStreamBuilder {
         }
 
         // Build the EventsStream objects
+        final Map<UUID, Integer> bcdCache = new HashMap<UUID, Integer>();
         final Map<UUID, Collection<EventsStream>> entitlementsPerBundle = new HashMap<UUID, Collection<EventsStream>>();
         for (final UUID bundleId : subscriptions.keySet()) {
             final SubscriptionBaseBundle bundle = bundlesPerId.get(bundleId);
             final List<SubscriptionBase> allSubscriptionsForBundle = subscriptions.get(bundleId);
-            final SubscriptionBase baseSubscription = Iterables.<SubscriptionBase>tryFind(allSubscriptionsForBundle,
-                                                                                          new Predicate<SubscriptionBase>() {
-                                                                                              @Override
-                                                                                              public boolean apply(final SubscriptionBase input) {
-                                                                                                  return ProductCategory.BASE.equals(input.getLastActiveProduct().getCategory());
-                                                                                              }
-                                                                                          }).orNull();
-            final List<BlockingState> bundleBlockingStates = Objects.firstNonNull(blockingStatesPerBundle.get(bundleId), ImmutableList.<BlockingState>of());
+            final SubscriptionBase baseSubscription = findBaseSubscription(allSubscriptionsForBundle);
+            final List<BlockingState> bundleBlockingStates = MoreObjects.firstNonNull(blockingStatesPerBundle.get(bundleId), ImmutableList.<BlockingState>of());
 
             if (entitlementsPerBundle.get(bundleId) == null) {
                 entitlementsPerBundle.put(bundleId, new LinkedList<EventsStream>());
             }
 
             for (final SubscriptionBase subscription : allSubscriptionsForBundle) {
-                final List<BlockingState> subscriptionBlockingStatesOnDisk = Objects.firstNonNull(blockingStatesPerSubscription.get(subscription.getId()), ImmutableList.<BlockingState>of());
+                final List<BlockingState> subscriptionBlockingStatesOnDisk = MoreObjects.firstNonNull(blockingStatesPerSubscription.get(subscription.getId()), ImmutableList.<BlockingState>of());
 
                 // We cannot always use blockingStatesForAccount here: we need subscriptionBlockingStates to contain the events not on disk when building an EventsStream
                 // for an add-on - which means going through the magic of ProxyBlockingStateDao, which will recursively
@@ -208,7 +218,7 @@ public class EventsStreamBuilder {
                 blockingStateSet.addAll(subscriptionBlockingStates);
                 final List<BlockingState> blockingStates = ProxyBlockingStateDao.sortedCopy(blockingStateSet);
 
-                final EventsStream eventStream = buildForEntitlement(account, bundle, baseSubscription, subscription, allSubscriptionsForBundle, blockingStates, internalTenantContext);
+                final EventsStream eventStream = buildForEntitlement(account, bundle, baseSubscription, subscription, allSubscriptionsForBundle, blockingStates, bcdCache, internalTenantContext);
                 entitlementsPerBundle.get(bundleId).add(eventStream);
             }
         }
@@ -224,21 +234,15 @@ public class EventsStreamBuilder {
         try {
             subscription = subscriptionInternalApi.getSubscriptionFromId(entitlementId, internalTenantContext);
             bundle = subscriptionInternalApi.getBundleFromId(subscription.getBundleId(), internalTenantContext);
-            allSubscriptionsForBundle = subscriptionInternalApi.getSubscriptionsForBundle(subscription.getBundleId(), internalTenantContext);
-            baseSubscription = Iterables.<SubscriptionBase>tryFind(allSubscriptionsForBundle,
-                                                                   new Predicate<SubscriptionBase>() {
-                                                                       @Override
-                                                                       public boolean apply(final SubscriptionBase input) {
-                                                                           return ProductCategory.BASE.equals(input.getLastActiveProduct().getCategory());
-                                                                       }
-                                                                   }).orNull(); // null for standalone subscriptions
+            allSubscriptionsForBundle = subscriptionInternalApi.getSubscriptionsForBundle(subscription.getBundleId(), null, internalTenantContext);
+            baseSubscription = findBaseSubscription(allSubscriptionsForBundle);
         } catch (SubscriptionBaseApiException e) {
             throw new EntitlementApiException(e);
         }
 
-        final Account account;
+        final ImmutableAccountData account;
         try {
-            account = accountInternalApi.getAccountById(bundle.getAccountId(), internalTenantContext);
+            account = accountInternalApi.getImmutableAccountDataById(bundle.getAccountId(), internalTenantContext);
         } catch (AccountApiException e) {
             throw new EntitlementApiException(e);
         }
@@ -246,25 +250,28 @@ public class EventsStreamBuilder {
         // Retrieve the blocking states
         final List<BlockingState> blockingStatesForAccount = defaultBlockingStateDao.getBlockingAllForAccountRecordId(internalTenantContext);
 
-        return buildForEntitlement(blockingStatesForAccount, account, bundle, baseSubscription, subscription, allSubscriptionsForBundle, internalTenantContext);
+        final Map<UUID, Integer> bcdCache = new HashMap<UUID, Integer>();
+        return buildForEntitlement(blockingStatesForAccount, account, bundle, baseSubscription, subscription, allSubscriptionsForBundle, bcdCache, internalTenantContext);
     }
 
     // Special signature for OptimizedProxyBlockingStateDao to save some DAO calls
     public EventsStream buildForEntitlement(final List<BlockingState> blockingStatesForAccount,
-                                            final Account account,
+                                            final ImmutableAccountData account,
                                             final SubscriptionBaseBundle bundle,
                                             final SubscriptionBase baseSubscription,
                                             final List<SubscriptionBase> allSubscriptionsForBundle,
                                             final InternalTenantContext internalTenantContext) throws EntitlementApiException {
-        return buildForEntitlement(blockingStatesForAccount, account, bundle, baseSubscription, baseSubscription, allSubscriptionsForBundle, internalTenantContext);
+        final Map<UUID, Integer> bcdCache = new HashMap<UUID, Integer>();
+        return buildForEntitlement(blockingStatesForAccount, account, bundle, baseSubscription, baseSubscription, allSubscriptionsForBundle, bcdCache, internalTenantContext);
     }
 
     private EventsStream buildForEntitlement(final List<BlockingState> blockingStatesForAccount,
-                                             final Account account,
+                                             final ImmutableAccountData account,
                                              final SubscriptionBaseBundle bundle,
                                              @Nullable final SubscriptionBase baseSubscription,
                                              final SubscriptionBase subscription,
                                              final List<SubscriptionBase> allSubscriptionsForBundle,
+                                             final Map<UUID, Integer> bcdCache,
                                              final InternalTenantContext internalTenantContext) throws EntitlementApiException {
         // Optimization: build lookup tables for blocking states states
         final Collection<BlockingState> accountBlockingStates = new LinkedList<BlockingState>();
@@ -287,8 +294,8 @@ public class EventsStreamBuilder {
             }
         }
 
-        final List<BlockingState> bundleBlockingStates = Objects.firstNonNull(blockingStatesPerBundle.get(subscription.getBundleId()), ImmutableList.<BlockingState>of());
-        final List<BlockingState> subscriptionBlockingStatesOnDisk = Objects.firstNonNull(blockingStatesPerSubscription.get(subscription.getId()), ImmutableList.<BlockingState>of());
+        final List<BlockingState> bundleBlockingStates = MoreObjects.firstNonNull(blockingStatesPerBundle.get(subscription.getBundleId()), ImmutableList.<BlockingState>of());
+        final List<BlockingState> subscriptionBlockingStatesOnDisk = MoreObjects.firstNonNull(blockingStatesPerSubscription.get(subscription.getId()), ImmutableList.<BlockingState>of());
 
         // We cannot always use blockingStatesForAccount here: we need subscriptionBlockingStates to contain the events not on disk when building an EventsStream
         // for an add-on - which means going through the magic of ProxyBlockingStateDao, which will recursively
@@ -316,24 +323,83 @@ public class EventsStreamBuilder {
         blockingStateSet.addAll(subscriptionBlockingStates);
         final List<BlockingState> blockingStates = ProxyBlockingStateDao.sortedCopy(blockingStateSet);
 
-        return buildForEntitlement(account, bundle, baseSubscription, subscription, allSubscriptionsForBundle, blockingStates, internalTenantContext);
+        return buildForEntitlement(account, bundle, baseSubscription, subscription, allSubscriptionsForBundle, blockingStates, bcdCache, internalTenantContext);
     }
 
-    private EventsStream buildForEntitlement(final Account account,
+    private EventsStream buildForEntitlement(final ImmutableAccountData account,
                                              final SubscriptionBaseBundle bundle,
                                              @Nullable final SubscriptionBase baseSubscription,
                                              final SubscriptionBase subscription,
                                              final List<SubscriptionBase> allSubscriptionsForBundle,
                                              final List<BlockingState> blockingStates,
+                                             final Map<UUID, Integer> bcdCache,
                                              final InternalTenantContext internalTenantContext) throws EntitlementApiException {
-        return new DefaultEventsStream(account,
-                                       bundle,
-                                       blockingStates,
-                                       checker,
-                                       baseSubscription,
-                                       subscription,
-                                       allSubscriptionsForBundle,
-                                       internalTenantContext,
-                                       clock.getUTCNow());
+
+
+        try {
+            int accountBCD = accountInternalApi.getBCD(account.getId(), internalTenantContext);
+            int defaultAlignmentDay = subscriptionInternalApi.getDefaultBillCycleDayLocal(bcdCache, subscription, baseSubscription, createPlanPhaseSpecifier(subscription), account.getTimeZone(), accountBCD, clock.getUTCNow(), internalTenantContext);
+            return new DefaultEventsStream(account,
+                                           bundle,
+                                           blockingStates,
+                                           checker,
+                                           baseSubscription,
+                                           subscription,
+                                           allSubscriptionsForBundle,
+                                           defaultAlignmentDay,
+                                           internalTenantContext,
+                                           clock.getUTCNow());
+        } catch (final SubscriptionBaseApiException e) {
+            throw new EntitlementApiException(e);
+        } catch (final AccountApiException e) {
+            throw new EntitlementApiException(e);
+        }
+    }
+
+    private PlanPhaseSpecifier createPlanPhaseSpecifier(final SubscriptionBase subscription) {
+
+        final String lastActiveProductName;
+        final BillingPeriod billingPeriod;
+        final ProductCategory productCategory;
+        final String priceListName;
+        final PhaseType phaseType;
+
+        if (subscription.getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition transition = subscription.getPendingTransition();
+            final Product pendingProduct = transition.getNextPlan().getProduct();
+            lastActiveProductName = pendingProduct.getName();
+            productCategory = pendingProduct.getCategory();
+            final PlanPhase pendingPlanPhase = transition.getNextPhase();
+            billingPeriod = pendingPlanPhase.getRecurring() != null ? pendingPlanPhase.getRecurring().getBillingPeriod() : BillingPeriod.NO_BILLING_PERIOD;
+            priceListName = transition.getNextPriceList().getName();
+            phaseType = transition.getNextPhase().getPhaseType();
+        } else {
+            final Product lastActiveProduct = subscription.getLastActiveProduct();
+            lastActiveProductName = lastActiveProduct.getName();
+            productCategory = lastActiveProduct.getCategory();
+            final PlanPhase lastActivePlanPhase = subscription.getLastActivePhase();
+            billingPeriod = lastActivePlanPhase.getRecurring() != null ? lastActivePlanPhase.getRecurring().getBillingPeriod() : BillingPeriod.NO_BILLING_PERIOD;
+            priceListName = subscription.getLastActivePlan().getPriceListName();
+            phaseType = subscription.getLastActivePhase().getPhaseType();
+        }
+        return new PlanPhaseSpecifier(lastActiveProductName,
+                                      billingPeriod,
+                                      priceListName,
+                                      phaseType);
+
+    }
+
+    private SubscriptionBase findBaseSubscription(final Iterable<SubscriptionBase> subscriptions) {
+        return Iterables.<SubscriptionBase>tryFind(subscriptions,
+                                                   new Predicate<SubscriptionBase>() {
+                                                       @Override
+                                                       public boolean apply(final SubscriptionBase input) {
+                                                           final List<SubscriptionBaseTransition> allTransitions = input.getAllTransitions();
+                                                           return !allTransitions.isEmpty() &&
+                                                                  allTransitions.get(0).getNextPlan() != null &&
+                                                                  allTransitions.get(0).getNextPlan().getProduct() != null &&
+                                                                  ProductCategory.BASE.equals(allTransitions.get(0).getNextPlan().getProduct().getCategory());
+                                                       }
+                                                   }).orNull(); // null for standalone subscriptions
     }
 }

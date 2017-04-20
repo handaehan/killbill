@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,33 +18,35 @@
 
 package org.killbill.billing.util.glue;
 
-import org.skife.config.ConfigSource;
-import org.skife.config.ConfigurationObjectFactory;
-
+import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.security.api.SecurityApi;
-import org.killbill.billing.util.config.SecurityConfig;
+import org.killbill.billing.util.config.definition.SecurityConfig;
 import org.killbill.billing.util.security.api.DefaultSecurityApi;
 import org.killbill.billing.util.security.api.DefaultSecurityService;
 import org.killbill.billing.util.security.api.SecurityService;
+import org.killbill.billing.util.security.shiro.dao.DefaultUserDao;
+import org.killbill.billing.util.security.shiro.dao.UserDao;
+import org.skife.config.ConfigurationObjectFactory;
 
-import com.google.inject.AbstractModule;
+public class SecurityModule extends KillBillModule {
 
-public class SecurityModule extends AbstractModule {
-
-    private final ConfigSource configSource;
-
-    public SecurityModule(final ConfigSource configSource) {
-        this.configSource = configSource;
+    public SecurityModule(final KillbillConfigSource configSource) {
+        super(configSource);
     }
 
     public void configure() {
         installConfig();
+        installDao();
         installSecurityApi();
         installSecurityService();
     }
 
+    protected void installDao() {
+        bind(UserDao.class).to(DefaultUserDao.class).asEagerSingleton();
+    }
+
     private void installConfig() {
-        final SecurityConfig securityConfig = new ConfigurationObjectFactory(configSource).build(SecurityConfig.class);
+        final SecurityConfig securityConfig = new ConfigurationObjectFactory(skifeConfigSource).build(SecurityConfig.class);
         bind(SecurityConfig.class).toInstance(securityConfig);
     }
 

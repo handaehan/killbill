@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2012 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,30 +21,34 @@ package org.killbill.billing.util.entity.dao;
 import java.lang.reflect.Proxy;
 
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
-import org.killbill.clock.Clock;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.billing.util.entity.Entity;
+import org.killbill.clock.Clock;
+import org.skife.jdbi.v2.Handle;
+import org.skife.jdbi.v2.sqlobject.SqlObjectBuilder;
 
 /**
  * Factory to create wrapped EntitySqlDao objects. During a transaction, make sure
  * to create other EntitySqlDao objects via the #become call.
  *
- * @param <InitialSqlDao> EntitySqlDao type to create
  * @see EntitySqlDaoWrapperInvocationHandler
  */
-public class EntitySqlDaoWrapperFactory<InitialSqlDao extends EntitySqlDao> {
+public class EntitySqlDaoWrapperFactory {
 
-    private final InitialSqlDao sqlDao;
+    private final Handle handle;
     private final Clock clock;
     private final CacheControllerDispatcher cacheControllerDispatcher;
 
     private final NonEntityDao nonEntityDao;
+    private final InternalCallContextFactory internalCallContextFactory;
 
-    public EntitySqlDaoWrapperFactory(final InitialSqlDao sqlDao, final Clock clock, final CacheControllerDispatcher cacheControllerDispatcher, final NonEntityDao nonEntityDao) {
-        this.sqlDao = sqlDao;
+    public EntitySqlDaoWrapperFactory(final Handle handle, final Clock clock, final CacheControllerDispatcher cacheControllerDispatcher, final NonEntityDao nonEntityDao, final InternalCallContextFactory internalCallContextFactory) {
+        this.handle = handle;
         this.clock = clock;
         this.cacheControllerDispatcher = cacheControllerDispatcher;
         this.nonEntityDao = nonEntityDao;
+        this.internalCallContextFactory = internalCallContextFactory;
     }
 
     /**
@@ -56,15 +62,12 @@ public class EntitySqlDaoWrapperFactory<InitialSqlDao extends EntitySqlDao> {
     public <NewSqlDao extends EntitySqlDao<NewEntityModelDao, NewEntity>,
             NewEntityModelDao extends EntityModelDao<NewEntity>,
             NewEntity extends Entity> NewSqlDao become(final Class<NewSqlDao> newSqlDaoClass) {
-        return create(newSqlDaoClass, sqlDao.become(newSqlDaoClass));
+        final NewSqlDao newSqlDao = SqlObjectBuilder.attach(handle, newSqlDaoClass);
+        return create(newSqlDaoClass, newSqlDao);
     }
 
-    public <SelfType> SelfType transmogrify(final Class<SelfType> newTransactionalClass) {
-        return sqlDao.become(newTransactionalClass);
-    }
-
-    public InitialSqlDao getSqlDao() {
-        return sqlDao;
+    public Handle getHandle() {
+        return handle;
     }
 
     private <NewSqlDao extends EntitySqlDao<NewEntityModelDao, NewEntity>,
@@ -73,7 +76,7 @@ public class EntitySqlDaoWrapperFactory<InitialSqlDao extends EntitySqlDao> {
         final ClassLoader classLoader = newSqlDao.getClass().getClassLoader();
         final Class[] interfacesToImplement = {newSqlDaoClass};
         final EntitySqlDaoWrapperInvocationHandler<NewSqlDao, NewEntityModelDao, NewEntity> wrapperInvocationHandler =
-                new EntitySqlDaoWrapperInvocationHandler<NewSqlDao, NewEntityModelDao, NewEntity>(newSqlDaoClass, newSqlDao, clock, cacheControllerDispatcher, nonEntityDao);
+                new EntitySqlDaoWrapperInvocationHandler<NewSqlDao, NewEntityModelDao, NewEntity>(newSqlDaoClass, newSqlDao, handle, clock, cacheControllerDispatcher, nonEntityDao, internalCallContextFactory);
 
         final Object newSqlDaoObject = Proxy.newProxyInstance(classLoader, interfacesToImplement, wrapperInvocationHandler);
         return newSqlDaoClass.cast(newSqlDaoObject);

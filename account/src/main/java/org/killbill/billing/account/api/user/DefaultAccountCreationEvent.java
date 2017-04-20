@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,7 +21,6 @@ package org.killbill.billing.account.api.user;
 import java.util.UUID;
 
 import org.joda.time.DateTimeZone;
-
 import org.killbill.billing.account.api.AccountData;
 import org.killbill.billing.account.dao.AccountModelDao;
 import org.killbill.billing.catalog.api.Currency;
@@ -29,6 +30,7 @@ import org.killbill.billing.events.BusEventBase;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.base.Strings;
 
 public class DefaultAccountCreationEvent extends BusEventBase implements AccountCreationInternalEvent {
 
@@ -45,7 +47,6 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
         this.id = id;
         this.data = data;
     }
-
 
     @JsonIgnore
     @Override
@@ -109,6 +110,8 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
         private final String email;
         private final Integer billCycleDayLocal;
         private final String currency;
+        private final UUID parentAccountId;
+        private final Boolean isPaymentDelegatedToParent;
         private final UUID paymentMethodId;
         private final String timeZone;
         private final String locale;
@@ -120,16 +123,19 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
         private final String postalCode;
         private final String country;
         private final String phone;
+        private final String notes;
         private final Boolean isMigrated;
         private final Boolean isNotifiedForInvoices;
 
         public DefaultAccountData(final AccountModelDao d) {
-            this(d.getExternalKey() != null ? d.getExternalKey() : null,
+            this(d.getExternalKey(),
                  d.getName(),
                  d.getFirstNameLength(),
                  d.getEmail(),
                  d.getBillingCycleDayLocal(),
                  d.getCurrency() != null ? d.getCurrency().name() : null,
+                 d.getParentAccountId(),
+                 d.getIsPaymentDelegatedToParent(),
                  d.getPaymentMethodId(),
                  d.getTimeZone() != null ? d.getTimeZone().getID() : null,
                  d.getLocale(),
@@ -141,6 +147,7 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
                  d.getPostalCode(),
                  d.getCountry(),
                  d.getPhone(),
+                 d.getNotes(),
                  d.getMigrated(),
                  d.getIsNotifiedForInvoices());
         }
@@ -152,6 +159,8 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
                                   @JsonProperty("email") final String email,
                                   @JsonProperty("billCycleDayLocal") final Integer billCycleDayLocal,
                                   @JsonProperty("currency") final String currency,
+                                  @JsonProperty("parentAccountId") final UUID parentAccountId,
+                                  @JsonProperty("isPaymentDelegatedToParent") final Boolean isPaymentDelegatedToParent,
                                   @JsonProperty("paymentMethodId") final UUID paymentMethodId,
                                   @JsonProperty("timeZone") final String timeZone,
                                   @JsonProperty("locale") final String locale,
@@ -163,6 +172,7 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
                                   @JsonProperty("postalCode") final String postalCode,
                                   @JsonProperty("country") final String country,
                                   @JsonProperty("phone") final String phone,
+                                  @JsonProperty("notes") final String notes,
                                   @JsonProperty("isMigrated") final Boolean isMigrated,
                                   @JsonProperty("isNotifiedForInvoices") final Boolean isNotifiedForInvoices) {
             this.externalKey = externalKey;
@@ -171,6 +181,8 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
             this.email = email;
             this.billCycleDayLocal = billCycleDayLocal;
             this.currency = currency;
+            this.parentAccountId = parentAccountId;
+            this.isPaymentDelegatedToParent = isPaymentDelegatedToParent;
             this.paymentMethodId = paymentMethodId;
             this.timeZone = timeZone;
             this.locale = locale;
@@ -182,6 +194,7 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
             this.postalCode = postalCode;
             this.country = country;
             this.phone = phone;
+            this.notes = notes;
             this.isMigrated = isMigrated;
             this.isNotifiedForInvoices = isNotifiedForInvoices;
         }
@@ -213,13 +226,32 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
 
         @Override
         public Currency getCurrency() {
-            return currency == null ? null : Currency.valueOf(currency);
+            if (Strings.emptyToNull(currency) == null) {
+                return null;
+            } else {
+                return Currency.valueOf(currency);
+            }
+        }
+
+        @Override
+        public UUID getParentAccountId() {
+            return parentAccountId;
+        }
+
+        @Override
+        @JsonIgnore
+        public Boolean isPaymentDelegatedToParent() {
+            return isPaymentDelegatedToParent;
         }
 
         @JsonIgnore
         @Override
         public DateTimeZone getTimeZone() {
-            return DateTimeZone.forID(timeZone);
+            if (Strings.emptyToNull(timeZone) == null) {
+                return null;
+            } else {
+                return DateTimeZone.forID(timeZone);
+            }
         }
 
         @JsonProperty("timeZone")
@@ -273,6 +305,11 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
         }
 
         @Override
+        public String getNotes() {
+            return notes;
+        }
+
+        @Override
         public UUID getPaymentMethodId() {
             return paymentMethodId;
         }
@@ -289,7 +326,7 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
             return isNotifiedForInvoices;
         }
 
-        // These two getters are for Jackson serialization only
+        // These getters are for Jackson serialization only
 
         public Boolean getIsMigrated() {
             return isMigrated;
@@ -297,6 +334,10 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
 
         public Boolean getIsNotifiedForInvoices() {
             return isNotifiedForInvoices;
+        }
+
+        public Boolean getIsPaymentDelegatedToParent() {
+            return isPaymentDelegatedToParent;
         }
 
         @Override
@@ -337,6 +378,12 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
             if (currency != null ? !currency.equals(that.currency) : that.currency != null) {
                 return false;
             }
+            if (parentAccountId != null ? !parentAccountId.equals(that.parentAccountId) : that.parentAccountId != null) {
+                return false;
+            }
+            if (isPaymentDelegatedToParent != null ? !isPaymentDelegatedToParent.equals(that.isPaymentDelegatedToParent) : that.isPaymentDelegatedToParent != null) {
+                return false;
+            }
             if (email != null ? !email.equals(that.email) : that.email != null) {
                 return false;
             }
@@ -356,6 +403,9 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
                 return false;
             }
             if (phone != null ? !phone.equals(that.phone) : that.phone != null) {
+                return false;
+            }
+            if (notes != null ? !notes.equals(that.notes) : that.notes != null) {
                 return false;
             }
             if (postalCode != null ? !postalCode.equals(that.postalCode) : that.postalCode != null) {
@@ -379,6 +429,8 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
             result = 31 * result + (email != null ? email.hashCode() : 0);
             result = 31 * result + (billCycleDayLocal != null ? billCycleDayLocal.hashCode() : 0);
             result = 31 * result + (currency != null ? currency.hashCode() : 0);
+            result = 31 * result + (parentAccountId != null ? parentAccountId.hashCode() : 0);
+            result = 31 * result + (isPaymentDelegatedToParent != null ? isPaymentDelegatedToParent.hashCode() : 0);
             result = 31 * result + (paymentMethodId != null ? paymentMethodId.hashCode() : 0);
             result = 31 * result + (timeZone != null ? timeZone.hashCode() : 0);
             result = 31 * result + (locale != null ? locale.hashCode() : 0);
@@ -390,6 +442,7 @@ public class DefaultAccountCreationEvent extends BusEventBase implements Account
             result = 31 * result + (postalCode != null ? postalCode.hashCode() : 0);
             result = 31 * result + (country != null ? country.hashCode() : 0);
             result = 31 * result + (phone != null ? phone.hashCode() : 0);
+            result = 31 * result + (notes != null ? notes.hashCode() : 0);
             result = 31 * result + (isMigrated != null ? isMigrated.hashCode() : 0);
             result = 31 * result + (isNotifiedForInvoices != null ? isNotifiedForInvoices.hashCode() : 0);
             return result;

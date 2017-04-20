@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -21,23 +23,26 @@ import java.util.UUID;
 
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
-import org.killbill.billing.util.entity.Pagination;
 
-public interface AccountInternalApi {
+public interface AccountInternalApi extends ImmutableAccountInternalApi {
 
-    public Account getAccountByKey(String key, InternalTenantContext context) throws AccountApiException;
+    Account getAccountByKey(String key, InternalTenantContext context) throws AccountApiException;
 
-    public Account getAccountById(UUID accountId, InternalTenantContext context) throws AccountApiException;
+    Account getAccountById(UUID accountId, InternalTenantContext context) throws AccountApiException;
 
-    public Account getAccountByRecordId(Long recordId, InternalTenantContext context) throws AccountApiException;
+    Account getAccountByRecordId(Long recordId, InternalTenantContext context) throws AccountApiException;
 
-    public void updateAccount(String key, AccountData accountData, InternalCallContext context) throws AccountApiException;
+    void updateBCD(String key, int bcd, InternalCallContext context) throws AccountApiException;
 
-    public List<AccountEmail> getEmails(UUID accountId, InternalTenantContext context);
+    int getBCD(UUID accountId, InternalTenantContext context) throws AccountApiException;
 
-    public void removePaymentMethod(UUID accountId, InternalCallContext context) throws AccountApiException;
+    List<AccountEmail> getEmails(UUID accountId, InternalTenantContext context);
 
-    public void updatePaymentMethod(UUID accountId, UUID paymentMethodId, InternalCallContext context) throws AccountApiException;
+    void removePaymentMethod(UUID accountId, InternalCallContext context) throws AccountApiException;
 
-    public UUID getByRecordId(Long recordId, InternalTenantContext context) throws AccountApiException;
+    void updatePaymentMethod(UUID accountId, UUID paymentMethodId, InternalCallContext context) throws AccountApiException;
+
+    UUID getByRecordId(Long recordId, InternalTenantContext context) throws AccountApiException;
+
+    List<Account> getChildrenAccounts(UUID parentAccountId, InternalCallContext context) throws AccountApiException;
 }

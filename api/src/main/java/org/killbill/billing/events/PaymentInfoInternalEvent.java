@@ -16,26 +16,5 @@
 
 package org.killbill.billing.events;
 
-import java.math.BigDecimal;
-import java.util.UUID;
-
-import org.joda.time.DateTime;
-
-import org.killbill.billing.payment.api.PaymentStatus;
-
-public interface PaymentInfoInternalEvent extends BusInternalEvent {
-
-    public UUID getPaymentId();
-
-    public UUID getAccountId();
-
-    public UUID getInvoiceId();
-
-    public BigDecimal getAmount();
-
-    public DateTime getEffectiveDate();
-
-    public Integer getPaymentNumber();
-
-    public PaymentStatus getStatus();
+public interface PaymentInfoInternalEvent extends PaymentInternalEvent {
 }

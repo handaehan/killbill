@@ -22,14 +22,15 @@ import java.util.UUID;
 
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.entitlement.api.SubscriptionApiException;
 import org.killbill.billing.subscription.api.SubscriptionBase;
-import org.killbill.billing.subscription.api.migration.AccountMigrationData;
-import org.killbill.billing.subscription.api.migration.AccountMigrationData.BundleMigrationData;
-import org.killbill.billing.subscription.api.timeline.SubscriptionDataRepair;
+import org.killbill.billing.subscription.api.SubscriptionBaseWithAddOns;
+import org.killbill.billing.subscription.api.transfer.BundleTransferData;
 import org.killbill.billing.subscription.api.transfer.TransferCancelData;
 import org.killbill.billing.subscription.api.user.DefaultSubscriptionBase;
 import org.killbill.billing.subscription.api.user.DefaultSubscriptionBaseBundle;
+import org.killbill.billing.subscription.api.user.DefaultSubscriptionBaseWithAddOns;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
 import org.killbill.billing.subscription.engine.dao.model.SubscriptionBundleModelDao;
 import org.killbill.billing.subscription.events.SubscriptionBaseEvent;
@@ -53,27 +54,27 @@ public interface SubscriptionDao extends EntityDao<SubscriptionBundleModelDao, S
 
     public SubscriptionBaseBundle createSubscriptionBundle(DefaultSubscriptionBaseBundle bundle, InternalCallContext context);
 
-    public SubscriptionBase getSubscriptionFromId(UUID subscriptionId, InternalTenantContext context);
+    public SubscriptionBase getSubscriptionFromId(UUID subscriptionId, InternalTenantContext context) throws CatalogApiException;
 
     // ACCOUNT retrieval
     public UUID getAccountIdFromSubscriptionId(UUID subscriptionId, InternalTenantContext context);
 
     // SubscriptionBase retrieval
-    public SubscriptionBase getBaseSubscription(UUID bundleId, InternalTenantContext context);
+    public SubscriptionBase getBaseSubscription(UUID bundleId, InternalTenantContext context) throws CatalogApiException;
 
-    public List<SubscriptionBase> getSubscriptions(UUID bundleId, InternalTenantContext context);
+    public List<SubscriptionBase> getSubscriptions(UUID bundleId, List<SubscriptionBaseEvent> dryRunEvents, InternalTenantContext context) throws CatalogApiException;
 
-    public Map<UUID, List<SubscriptionBase>> getSubscriptionsForAccount(InternalTenantContext context);
+    public Map<UUID, List<SubscriptionBase>> getSubscriptionsForAccount(InternalTenantContext context) throws CatalogApiException;
 
     // Update
     public void updateChargedThroughDate(DefaultSubscriptionBase subscription, InternalCallContext context);
 
     // Event apis
-    public void createNextPhaseEvent(DefaultSubscriptionBase subscription, SubscriptionBaseEvent nextPhase, InternalCallContext context);
+    public void createNextPhaseEvent(DefaultSubscriptionBase subscription, SubscriptionBaseEvent readyPhaseEvent, SubscriptionBaseEvent nextPhase, InternalCallContext context);
 
     public SubscriptionBaseEvent getEventById(UUID eventId, InternalTenantContext context);
 
-    public Map<UUID, List<SubscriptionBaseEvent>> getEventsForBundle(UUID bundleId, InternalTenantContext context);
+    public Iterable<SubscriptionBaseEvent> getFutureEventsForAccount(InternalTenantContext context);
 
     public List<SubscriptionBaseEvent> getEventsForSubscription(UUID subscriptionId, InternalTenantContext context);
 
@@ -82,23 +83,22 @@ public interface SubscriptionDao extends EntityDao<SubscriptionBundleModelDao, S
     // SubscriptionBase creation, cancellation, changePlanWithRequestedDate apis
     public void createSubscription(DefaultSubscriptionBase subscription, List<SubscriptionBaseEvent> initialEvents, InternalCallContext context);
 
-    public void recreateSubscription(DefaultSubscriptionBase subscription, List<SubscriptionBaseEvent> recreateEvents, InternalCallContext context);
+    public void createSubscriptionsWithAddOns(List<SubscriptionBaseWithAddOns> subscriptions, Map<UUID, List<SubscriptionBaseEvent>> initialEventsMap, InternalCallContext context);
 
-    public void cancelSubscription(DefaultSubscriptionBase subscription, SubscriptionBaseEvent cancelEvent, InternalCallContext context, int cancelSeq);
+    public void cancelSubscriptionsOnBasePlanEvent(DefaultSubscriptionBase subscription, SubscriptionBaseEvent event, List<DefaultSubscriptionBase> subscriptions, List<SubscriptionBaseEvent> cancelEvents, InternalCallContext context);
+
+    public void notifyOnBasePlanEvent(final DefaultSubscriptionBase subscription, final SubscriptionBaseEvent event, final InternalCallContext context);
 
     public void cancelSubscriptions(List<DefaultSubscriptionBase> subscriptions, List<SubscriptionBaseEvent> cancelEvents, InternalCallContext context);
 
     public void uncancelSubscription(DefaultSubscriptionBase subscription, List<SubscriptionBaseEvent> uncancelEvents, InternalCallContext context);
 
-    public void changePlan(DefaultSubscriptionBase subscription, List<SubscriptionBaseEvent> changeEvents, InternalCallContext context);
+    public void changePlan(DefaultSubscriptionBase subscription, List<SubscriptionBaseEvent> changeEvents, List<DefaultSubscriptionBase> subscriptionsToBeCancelled, List<SubscriptionBaseEvent> cancelEvents, InternalCallContext context);
 
-    public void migrate(UUID accountId, AccountMigrationData data, InternalCallContext context);
-
-    public void transfer(UUID srcAccountId, UUID destAccountId, BundleMigrationData data, List<TransferCancelData> transferCancelData, InternalCallContext fromContext, InternalCallContext toContext);
+    public void transfer(UUID srcAccountId, UUID destAccountId, BundleTransferData data, List<TransferCancelData> transferCancelData, InternalCallContext fromContext, InternalCallContext toContext);
 
     public void updateBundleExternalKey(UUID bundleId, String externalKey, InternalCallContext context);
 
-    // Repair
-    public void repair(UUID accountId, UUID bundleId, List<SubscriptionDataRepair> inRepair, InternalCallContext context);
+    public void createBCDChangeEvent(DefaultSubscriptionBase subscription, SubscriptionBaseEvent bcdEvent, InternalCallContext context);
 }
 

@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2012 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -20,6 +22,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.entity.dao.DefaultPaginationSqlDaoHelper.Ordering;
 import org.skife.jdbi.v2.IDBI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,8 +66,8 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
 
     @Inject
     public DefaultTagDao(final IDBI dbi, final TagEventBuilder tagEventBuilder, final PersistentBus bus, final Clock clock,
-                         final CacheControllerDispatcher controllerDispatcher, final NonEntityDao nonEntityDao) {
-        super(new EntitySqlDaoTransactionalJdbiWrapper(dbi, clock, controllerDispatcher, nonEntityDao), TagSqlDao.class);
+                         final CacheControllerDispatcher controllerDispatcher, final NonEntityDao nonEntityDao, final InternalCallContextFactory internalCallContextFactory) {
+        super(new EntitySqlDaoTransactionalJdbiWrapper(dbi, clock, controllerDispatcher, nonEntityDao, internalCallContextFactory), TagSqlDao.class);
         this.tagEventBuilder = tagEventBuilder;
         this.bus = bus;
     }
@@ -72,7 +76,7 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
     public List<TagModelDao> getTagsForObject(final UUID objectId, final ObjectType objectType, final boolean includedDeleted, final InternalTenantContext internalTenantContext) {
         return transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<List<TagModelDao>>() {
             @Override
-            public List<TagModelDao> inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public List<TagModelDao> inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
                 final TagSqlDao tagSqlDao = entitySqlDaoWrapperFactory.become(TagSqlDao.class);
                 if (includedDeleted) {
                     return tagSqlDao.getTagsForObjectIncludedDeleted(objectId, objectType, internalTenantContext);
@@ -84,7 +88,7 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
     }
 
     @Override
-    public List<TagModelDao> getTagsForAccountType(final UUID accountId, final ObjectType objectType, final boolean includedDeleted, final InternalTenantContext internalTenantContext) {
+    public List<TagModelDao> getTagsForAccountType(final ObjectType objectType, final boolean includedDeleted, final InternalTenantContext internalTenantContext) {
         final List<TagModelDao> allTags = getTagsForAccount(includedDeleted, internalTenantContext);
         return ImmutableList.<TagModelDao>copyOf(Collections2.filter(allTags, new Predicate<TagModelDao>() {
             @Override
@@ -98,7 +102,7 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
     public List<TagModelDao> getTagsForAccount(final boolean includedDeleted, final InternalTenantContext internalTenantContext) {
         return transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<List<TagModelDao>>() {
             @Override
-            public List<TagModelDao> inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public List<TagModelDao> inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
                 final TagSqlDao tagSqlDao = entitySqlDaoWrapperFactory.become(TagSqlDao.class);
                 if (includedDeleted) {
                     return tagSqlDao.getByAccountRecordIdIncludedDeleted(internalTenantContext);
@@ -111,7 +115,7 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
 
     @Override
     protected void postBusEventFromTransaction(final TagModelDao tag, final TagModelDao savedTag, final ChangeType changeType,
-                                               final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory, final InternalCallContext context)
+                                               final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory, final InternalCallContext context)
             throws BillingExceptionBase {
 
         final TagInternalEvent tagEvent;
@@ -137,9 +141,9 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
         }
 
         try {
-            bus.postFromTransaction(tagEvent, entitySqlDaoWrapperFactory.getSqlDao());
-        } catch (PersistentBus.EventBusException e) {
-            log.warn("Failed to post tag event for tag " + tag.getId().toString(), e);
+            bus.postFromTransaction(tagEvent, entitySqlDaoWrapperFactory.getHandle().getConnection());
+        } catch (final PersistentBus.EventBusException e) {
+            log.warn("Failed to post tag event for tagId='{}'", tag.getId().toString(), e);
         }
     }
 
@@ -162,14 +166,8 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
         return new TagApiException(ErrorCode.TAG_ALREADY_EXISTS, entity.toString());
     }
 
-    private TagDefinitionModelDao getTagDefinitionFromTransaction(final UUID tagDefinitionId, final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory, final InternalTenantContext context) throws TagApiException {
-        TagDefinitionModelDao tagDefintion = null;
-        for (final ControlTagType t : ControlTagType.values()) {
-            if (t.getId().equals(tagDefinitionId)) {
-                tagDefintion = new TagDefinitionModelDao(t);
-                break;
-            }
-        }
+    private TagDefinitionModelDao getTagDefinitionFromTransaction(final UUID tagDefinitionId, final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory, final InternalTenantContext context) throws TagApiException {
+        TagDefinitionModelDao tagDefintion = SystemTags.lookup(tagDefinitionId);
         if (tagDefintion == null) {
             final TagDefinitionSqlDao transTagDefintionSqlDao = entitySqlDaoWrapperFactory.become(TagDefinitionSqlDao.class);
             tagDefintion = transTagDefintionSqlDao.getById(tagDefinitionId.toString(), context);
@@ -192,7 +190,7 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
         transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<Void>() {
 
             @Override
-            public Void inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public Void inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
 
                 final TagDefinitionModelDao tagDefinition = getTagDefinitionFromTransaction(tagDefinitionId, entitySqlDaoWrapperFactory, context);
                 final TagSqlDao transactional = entitySqlDaoWrapperFactory.become(TagSqlDao.class);
@@ -227,8 +225,8 @@ public class DefaultTagDao extends EntityDaoBase<TagModelDao, Tag, TagApiExcepti
                                                   }
 
                                                   @Override
-                                                  public Iterator<TagModelDao> build(final TagSqlDao tagSqlDao, final Long limit, final InternalTenantContext context) {
-                                                      return tagSqlDao.search(searchKey, String.format("%%%s%%", searchKey), offset, limit, context);
+                                                  public Iterator<TagModelDao> build(final TagSqlDao tagSqlDao, final Long offset, final Long limit, final Ordering ordering, final InternalTenantContext context) {
+                                                      return tagSqlDao.search(searchKey, String.format("%%%s%%", searchKey), offset, limit, ordering.toString(), context);
                                                   }
                                               },
                                               offset,

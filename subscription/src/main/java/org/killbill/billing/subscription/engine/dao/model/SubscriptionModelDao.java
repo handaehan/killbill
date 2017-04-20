@@ -25,34 +25,34 @@ import org.killbill.billing.subscription.api.user.SubscriptionBuilder;
 import org.killbill.billing.subscription.api.user.DefaultSubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.util.dao.TableName;
-import org.killbill.billing.entity.EntityBase;
 import org.killbill.billing.util.entity.dao.EntityModelDao;
+import org.killbill.billing.util.entity.dao.EntityModelDaoBase;
 
-public class SubscriptionModelDao extends EntityBase implements EntityModelDao<SubscriptionBase> {
+public class SubscriptionModelDao extends EntityModelDaoBase implements EntityModelDao<SubscriptionBase> {
 
     private UUID bundleId;
     private ProductCategory category;
     private DateTime startDate;
     private DateTime bundleStartDate;
-    private long activeVersion;
     private DateTime chargedThroughDate;
+    private boolean migrated;
 
     public SubscriptionModelDao() { /* For the DAO mapper */ }
 
     public SubscriptionModelDao(final UUID id, final UUID bundleId, final ProductCategory category, final DateTime startDate, final DateTime bundleStartDate,
-                                final long activeVersion, final DateTime chargedThroughDate, final DateTime createdDate, final DateTime updateDate) {
+                                final DateTime chargedThroughDate, final boolean migrated, final DateTime createdDate, final DateTime updateDate) {
         super(id, createdDate, updateDate);
         this.bundleId = bundleId;
         this.category = category;
         this.startDate = startDate;
         this.bundleStartDate = bundleStartDate;
-        this.activeVersion = activeVersion;
         this.chargedThroughDate = chargedThroughDate;
+        this.migrated = migrated;
     }
 
     public SubscriptionModelDao(final DefaultSubscriptionBase src) {
-        this(src.getId(), src.getBundleId(), src.getCategory(), src.getAlignStartDate(), src.getBundleStartDate(), src.getActiveVersion(),
-             src.getChargedThroughDate(), src.getCreatedDate(), src.getUpdatedDate());
+        this(src.getId(), src.getBundleId(), src.getCategory(), src.getAlignStartDate(), src.getBundleStartDate(),
+             src.getChargedThroughDate(), src.isMigrated(), src.getCreatedDate(), src.getUpdatedDate());
     }
 
     public UUID getBundleId() {
@@ -71,9 +71,6 @@ public class SubscriptionModelDao extends EntityBase implements EntityModelDao<S
         return bundleStartDate;
     }
 
-    public long getActiveVersion() {
-        return activeVersion;
-    }
 
     public DateTime getChargedThroughDate() {
         return chargedThroughDate;
@@ -95,28 +92,34 @@ public class SubscriptionModelDao extends EntityBase implements EntityModelDao<S
         this.bundleStartDate = bundleStartDate;
     }
 
-    public void setActiveVersion(final long activeVersion) {
-        this.activeVersion = activeVersion;
-    }
 
     public void setChargedThroughDate(final DateTime chargedThroughDate) {
         this.chargedThroughDate = chargedThroughDate;
     }
 
-    public static SubscriptionBase toSubscription(final SubscriptionModelDao src) {
+    public boolean isMigrated() {
+        return migrated;
+    }
+
+    public void setMigrated(final boolean migrated) {
+        this.migrated = migrated;
+    }
+
+    public static SubscriptionBase toSubscription(final SubscriptionModelDao src, final String externalKey) {
         if (src == null) {
             return null;
         }
         return new DefaultSubscriptionBase(new SubscriptionBuilder()
                                             .setId(src.getId())
                                             .setBundleId(src.getBundleId())
+                                            .setBundleExternalKey(externalKey)
                                             .setCategory(src.getCategory())
                                             .setCreatedDate(src.getCreatedDate())
                                             .setUpdatedDate(src.getUpdatedDate())
                                             .setBundleStartDate(src.getBundleStartDate())
                                             .setAlignStartDate(src.getStartDate())
-                                            .setActiveVersion(src.getActiveVersion())
                                             .setChargedThroughDate(src.getChargedThroughDate())
+                                            .setMigrated(src.isMigrated())
                                             .setCreatedDate(src.getCreatedDate())
                                             .setUpdatedDate(src.getUpdatedDate()));
     }
@@ -129,8 +132,8 @@ public class SubscriptionModelDao extends EntityBase implements EntityModelDao<S
         sb.append(", category=").append(category);
         sb.append(", startDate=").append(startDate);
         sb.append(", bundleStartDate=").append(bundleStartDate);
-        sb.append(", activeVersion=").append(activeVersion);
         sb.append(", chargedThroughDate=").append(chargedThroughDate);
+        sb.append(", migrated=").append(migrated);
         sb.append('}');
         return sb.toString();
     }
@@ -149,9 +152,6 @@ public class SubscriptionModelDao extends EntityBase implements EntityModelDao<S
 
         final SubscriptionModelDao that = (SubscriptionModelDao) o;
 
-        if (activeVersion != that.activeVersion) {
-            return false;
-        }
         if (bundleId != null ? !bundleId.equals(that.bundleId) : that.bundleId != null) {
             return false;
         }
@@ -162,6 +162,9 @@ public class SubscriptionModelDao extends EntityBase implements EntityModelDao<S
             return false;
         }
         if (chargedThroughDate != null ? !chargedThroughDate.equals(that.chargedThroughDate) : that.chargedThroughDate != null) {
+            return false;
+        }
+        if (migrated != that.migrated) {
             return false;
         }
         if (startDate != null ? !startDate.equals(that.startDate) : that.startDate != null) {
@@ -178,8 +181,8 @@ public class SubscriptionModelDao extends EntityBase implements EntityModelDao<S
         result = 31 * result + (category != null ? category.hashCode() : 0);
         result = 31 * result + (startDate != null ? startDate.hashCode() : 0);
         result = 31 * result + (bundleStartDate != null ? bundleStartDate.hashCode() : 0);
-        result = 31 * result + (int) (activeVersion ^ (activeVersion >>> 32));
         result = 31 * result + (chargedThroughDate != null ? chargedThroughDate.hashCode() : 0);
+        result = 31 * result + Boolean.valueOf(migrated).hashCode();
         return result;
     }
 

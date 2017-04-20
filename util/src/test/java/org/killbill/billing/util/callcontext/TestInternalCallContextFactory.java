@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2012 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,6 +21,9 @@ package org.killbill.billing.util.callcontext;
 import java.util.Date;
 import java.util.UUID;
 
+import org.killbill.billing.account.api.ImmutableAccountData;
+import org.killbill.billing.callcontext.InternalTenantContext;
+import org.mockito.Mockito;
 import org.skife.jdbi.v2.Handle;
 import org.skife.jdbi.v2.tweak.HandleCallback;
 import org.testng.Assert;
@@ -36,26 +41,29 @@ public class TestInternalCallContextFactory extends UtilTestSuiteWithEmbeddedDB 
         final UUID invoiceId = UUID.randomUUID();
         final Long accountRecordId = 19384012L;
 
+        final ImmutableAccountData immutableAccountData = Mockito.mock(ImmutableAccountData.class);
+        Mockito.when(immutableAccountInternalApi.getImmutableAccountDataByRecordId(Mockito.<Long>eq(accountRecordId), Mockito.<InternalTenantContext>any())).thenReturn(immutableAccountData);
+
         dbi.withHandle(new HandleCallback<Void>() {
             @Override
             public Void withHandle(final Handle handle) throws Exception {
                 handle.execute("DROP TABLE IF EXISTS invoices;\n" +
                                "CREATE TABLE invoices (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
-                               "    account_id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
+                               "    account_id varchar(36) NOT NULL,\n" +
                                "    invoice_date date NOT NULL,\n" +
                                "    target_date date NOT NULL,\n" +
-                               "    currency char(3) NOT NULL,\n" +
+                               "    currency varchar(3) NOT NULL,\n" +
                                "    migrated bool NOT NULL,\n" +
                                "    created_by varchar(50) NOT NULL,\n" +
                                "    created_date datetime NOT NULL,\n" +
-                               "    account_record_id int(11) unsigned default null,\n" +
-                               "    tenant_record_id int(11) unsigned default null,\n" +
+                               "    account_record_id bigint /*! unsigned */ not null,\n" +
+                               "    tenant_record_id bigint /*! unsigned */ not null default 0,\n" +
                                "    PRIMARY KEY(record_id)\n" +
                                ");");
                 handle.execute("insert into invoices (id, account_id, invoice_date, target_date, currency, migrated, created_by, created_date, account_record_id) values " +
-                               "(?, ?, now(), now(), 'USD', 0, 'test', now(), ?)", invoiceId.toString(), UUID.randomUUID().toString(), accountRecordId);
+                               "(?, ?, now(), now(), 'USD', false, 'test', now(), ?)", invoiceId.toString(), UUID.randomUUID().toString(), accountRecordId);
                 return null;
             }
         });
@@ -70,6 +78,9 @@ public class TestInternalCallContextFactory extends UtilTestSuiteWithEmbeddedDB 
     public void testCreateInternalCallContextWithAccountRecordIdFromAccountObjectType() throws Exception {
         final UUID accountId = UUID.randomUUID();
         final Long accountRecordId = 19384012L;
+
+        final ImmutableAccountData immutableAccountData = Mockito.mock(ImmutableAccountData.class);
+        Mockito.when(immutableAccountInternalApi.getImmutableAccountDataByRecordId(Mockito.<Long>eq(accountRecordId), Mockito.<InternalTenantContext>any())).thenReturn(immutableAccountData);
 
         dbi.withHandle(new HandleCallback<Void>() {
             @Override
@@ -90,9 +101,9 @@ public class TestInternalCallContextFactory extends UtilTestSuiteWithEmbeddedDB 
     private void verifyInternalCallContext(final InternalCallContext context) {
         Assert.assertEquals(context.getCallOrigin(), callContext.getCallOrigin());
         Assert.assertEquals(context.getComments(), callContext.getComments());
-        Assert.assertEquals(context.getCreatedDate(), callContext.getCreatedDate());
+        Assert.assertTrue(context.getCreatedDate().compareTo(callContext.getCreatedDate()) >= 0);
         Assert.assertEquals(context.getReasonCode(), callContext.getReasonCode());
-        Assert.assertEquals(context.getUpdatedDate(), callContext.getUpdatedDate());
+        Assert.assertTrue(context.getUpdatedDate().compareTo(callContext.getUpdatedDate()) >= 0);
         Assert.assertEquals(context.getCreatedBy(), callContext.getUserName());
         Assert.assertEquals(context.getUserToken(), callContext.getUserToken());
         Assert.assertEquals(context.getContextUserType(), callContext.getUserType());

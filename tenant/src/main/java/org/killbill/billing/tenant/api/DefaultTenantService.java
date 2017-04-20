@@ -16,12 +16,46 @@
 
 package org.killbill.billing.tenant.api;
 
+import javax.inject.Inject;
+
+import org.killbill.billing.platform.api.LifecycleHandlerType;
+import org.killbill.billing.platform.api.LifecycleHandlerType.LifecycleLevel;
+import org.killbill.billing.tenant.api.TenantKV.TenantKey;
+import org.killbill.billing.tenant.api.user.DefaultTenantUserApi;
+
 public class DefaultTenantService implements TenantService {
 
     private static final String TENANT_SERVICE_NAME = "tenant-service";
 
+    private final TenantCacheInvalidation tenantCacheInvalidation;
+    private final TenantCacheInvalidationCallback tenantCacheInvalidationCallback;
+
+    @Inject
+    public DefaultTenantService(final TenantCacheInvalidation tenantCacheInvalidation, final TenantCacheInvalidationCallback tenantCacheInvalidationCallback) {
+        this.tenantCacheInvalidation = tenantCacheInvalidation;
+        this.tenantCacheInvalidationCallback = tenantCacheInvalidationCallback;
+    }
+
     @Override
     public String getName() {
         return TENANT_SERVICE_NAME;
+    }
+
+    @LifecycleHandlerType(LifecycleLevel.INIT_SERVICE)
+    public void initialize() {
+        tenantCacheInvalidation.initialize();
+        for (TenantKey cacheableKey : DefaultTenantUserApi.CACHED_TENANT_KEY) {
+            tenantCacheInvalidation.registerCallback(cacheableKey, tenantCacheInvalidationCallback);
+        }
+    }
+
+    @LifecycleHandlerType(LifecycleLevel.START_SERVICE)
+    public void start() {
+        tenantCacheInvalidation.start();
+    }
+
+    @LifecycleHandlerType(LifecycleLevel.STOP_SERVICE)
+    public void stop() {
+        tenantCacheInvalidation.stop();
     }
 }

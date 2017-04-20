@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -46,7 +48,7 @@ public class TestDefaultInvoiceItemFormatter extends InvoiceTestSuiteNoDB {
     @BeforeClass(groups = "fast")
     public void beforeClass() throws Exception {
         super.beforeClass();
-        config = new ConfigurationObjectFactory(configSource).build(TranslatorConfig.class);
+        config = new ConfigurationObjectFactory(skifeConfigSource).build(TranslatorConfig.class);
         templateEngine = new MustacheTemplateEngine();
     }
 
@@ -109,7 +111,7 @@ public class TestDefaultInvoiceItemFormatter extends InvoiceTestSuiteNoDB {
 
     private void checkOutput(final InvoiceItem invoiceItem, final String template, final String expected, final Locale locale) {
         final Map<String, Object> data = new HashMap<String, Object>();
-        data.put("invoiceItem", new DefaultInvoiceItemFormatter(config, invoiceItem, DateTimeFormat.mediumDate(), locale));
+        data.put("invoiceItem", new DefaultInvoiceItemFormatter(config, invoiceItem,  DateTimeFormat.mediumDate().withLocale(locale), locale, internalCallContext, resourceBundleFactory));
 
         final String formattedText = templateEngine.executeTemplateText(template, data);
         Assert.assertEquals(formattedText, expected);

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -29,6 +31,7 @@ import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceItem;
 import org.killbill.billing.invoice.api.formatters.InvoiceFormatterFactory;
+import org.killbill.billing.invoice.template.HtmlInvoice;
 import org.killbill.billing.invoice.template.HtmlInvoiceGenerator;
 import org.killbill.billing.invoice.template.formatters.DefaultInvoiceFormatterFactory;
 import org.killbill.billing.util.email.templates.MustacheTemplateEngine;
@@ -48,28 +51,32 @@ public class TestHtmlInvoiceGenerator extends InvoiceTestSuiteNoDB {
     @BeforeClass(groups = "fast")
     public void beforeClass() throws Exception {
         super.beforeClass();
-        final TranslatorConfig config = new ConfigurationObjectFactory(configSource).build(TranslatorConfig.class);
+        final TranslatorConfig config = new ConfigurationObjectFactory(skifeConfigSource).build(TranslatorConfig.class);
         final TemplateEngine templateEngine = new MustacheTemplateEngine();
         final InvoiceFormatterFactory factory = new DefaultInvoiceFormatterFactory();
-        g = new HtmlInvoiceGenerator(factory, templateEngine, config, null);
+        g = new HtmlInvoiceGenerator(factory, templateEngine, config, null, resourceBundleFactory, null);
     }
 
     @Test(groups = "fast")
     public void testGenerateInvoice() throws Exception {
-        final String output = g.generateInvoice(createAccount(), createInvoice(), false);
+        final HtmlInvoice output = g.generateInvoice(createAccount(), createInvoice(), false, internalCallContext);
         Assert.assertNotNull(output);
+        Assert.assertNotNull(output.getBody());
+        Assert.assertEquals(output.getSubject(), "Your invoice");
     }
 
     @Test(groups = "fast")
     public void testGenerateEmptyInvoice() throws Exception {
         final Invoice invoice = Mockito.mock(Invoice.class);
-        final String output = g.generateInvoice(createAccount(), invoice, false);
+        final HtmlInvoice output = g.generateInvoice(createAccount(), invoice, false, internalCallContext);
         Assert.assertNotNull(output);
+        Assert.assertNotNull(output.getBody());
+        Assert.assertEquals(output.getSubject(), "Your invoice");
     }
 
     @Test(groups = "fast")
     public void testGenerateNullInvoice() throws Exception {
-        final String output = g.generateInvoice(createAccount(), null, false);
+        final HtmlInvoice output = g.generateInvoice(createAccount(), null, false, internalCallContext);
         Assert.assertNull(output);
     }
 

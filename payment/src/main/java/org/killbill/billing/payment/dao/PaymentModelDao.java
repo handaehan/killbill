@@ -1,7 +1,8 @@
 /*
- * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,183 +17,108 @@
 
 package org.killbill.billing.payment.dao;
 
-import java.math.BigDecimal;
 import java.util.UUID;
 
 import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
-
-import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.payment.api.Payment;
-import org.killbill.billing.payment.api.PaymentStatus;
 import org.killbill.billing.util.dao.TableName;
-import org.killbill.billing.entity.EntityBase;
 import org.killbill.billing.util.entity.dao.EntityModelDao;
+import org.killbill.billing.util.entity.dao.EntityModelDaoBase;
+import org.killbill.billing.util.UUIDs;
 
-public class PaymentModelDao extends EntityBase implements EntityModelDao<Payment> {
+import com.google.common.base.MoreObjects;
 
-    public static final Integer INVALID_PAYMENT_NUMBER = new Integer(-13);
+public class PaymentModelDao extends EntityModelDaoBase implements EntityModelDao<Payment> {
+
+    public static final Integer INVALID_PAYMENT_NUMBER = new Integer(-17);
 
     private UUID accountId;
-    private UUID invoiceId;
-    private UUID paymentMethodId;
-    private BigDecimal amount;
-    private Currency currency;
-    private BigDecimal processedAmount;
-    private Currency processedCurrency;
-    private DateTime effectiveDate;
     private Integer paymentNumber;
-    private PaymentStatus paymentStatus;
-    private String extFirstPaymentRefId;
-    private String extSecondPaymentRefId;
+    private UUID paymentMethodId;
+    private String externalKey;
+    private String stateName;
+    private String lastSuccessStateName;
 
     public PaymentModelDao() { /* For the DAO mapper */ }
 
     public PaymentModelDao(final UUID id, @Nullable final DateTime createdDate, @Nullable final DateTime updatedDate, final UUID accountId,
-                           final UUID invoiceId, final UUID paymentMethodId,
-                           final Integer paymentNumber, final BigDecimal amount, final Currency currency, final BigDecimal processedAmount, final Currency processedCurrency,
-                           final PaymentStatus paymentStatus, final DateTime effectiveDate, final String extFirstPaymentRefId, final String extSecondPaymentRefId) {
+                           final UUID paymentMethodId, final Integer paymentNumber, @Nullable final String externalKey) {
         super(id, createdDate, updatedDate);
         this.accountId = accountId;
-        this.invoiceId = invoiceId;
         this.paymentMethodId = paymentMethodId;
         this.paymentNumber = paymentNumber;
-        this.amount = amount;
-        this.currency = currency;
-        this.processedAmount = processedAmount;
-        this.processedCurrency = processedCurrency;
-        this.paymentStatus = paymentStatus;
-        this.effectiveDate = effectiveDate;
-        this.extFirstPaymentRefId = extFirstPaymentRefId;
-        this.extSecondPaymentRefId = extSecondPaymentRefId;
+        this.externalKey = MoreObjects.firstNonNull(externalKey, id.toString());
     }
 
-    public PaymentModelDao(final UUID accountId, final UUID invoiceId, final UUID paymentMethodId,
-                           final BigDecimal amount, final Currency currency, final DateTime effectiveDate, final PaymentStatus paymentStatus) {
-        this(UUID.randomUUID(), null, null, accountId, invoiceId, paymentMethodId, INVALID_PAYMENT_NUMBER, amount, currency, amount, currency, paymentStatus, effectiveDate, null, null);
+    public PaymentModelDao(final UUID id, @Nullable final DateTime createdDate, @Nullable final DateTime updatedDate, final UUID accountId,
+                           final UUID paymentMethodId, @Nullable final String externalKey) {
+        this(id, createdDate, updatedDate, accountId, paymentMethodId, INVALID_PAYMENT_NUMBER, externalKey);
     }
 
-    public PaymentModelDao(final UUID accountId, final UUID invoiceId, final UUID paymentMethodId,
-                           final BigDecimal amount, final Currency currency, final DateTime effectiveDate) {
-        this(UUID.randomUUID(), null, null, accountId, invoiceId, paymentMethodId, INVALID_PAYMENT_NUMBER, amount, currency, amount, currency, PaymentStatus.UNKNOWN, effectiveDate, null, null);
+    public PaymentModelDao(@Nullable final DateTime createdDate, @Nullable final DateTime updatedDate, final UUID accountId,
+                           final UUID paymentMethodId, @Nullable final String externalKey) {
+        this(UUIDs.randomUUID(), createdDate, updatedDate, accountId, paymentMethodId, externalKey);
     }
 
-    public PaymentModelDao(final PaymentModelDao src, final PaymentStatus newPaymentStatus) {
-        this(src.getId(), src.getCreatedDate(), src.getUpdatedDate(), src.getAccountId(), src.getInvoiceId(), src.getPaymentMethodId(),
-             src.getPaymentNumber(), src.getAmount(), src.getCurrency(), src.getProcessedAmount(), src.getProcessedCurrency(), newPaymentStatus, src.getEffectiveDate(), null, null);
-    }
+    public UUID getAccountId() { return accountId; }
 
-    public UUID getAccountId() {
-        return accountId;
-    }
-
-    public UUID getInvoiceId() {
-        return invoiceId;
-    }
-
-    public UUID getPaymentMethodId() {
-        return paymentMethodId;
+    public void setAccountId(final UUID accountId) {
+        this.accountId = accountId;
     }
 
     public Integer getPaymentNumber() {
         return paymentNumber;
     }
 
-    public BigDecimal getAmount() {
-        return amount;
+    public void setPaymentNumber(final Integer paymentNumber) {
+        this.paymentNumber = paymentNumber;
     }
 
-    public Currency getCurrency() {
-        return currency;
-    }
-
-    public BigDecimal getProcessedAmount() {
-        return processedAmount;
-    }
-
-    public Currency getProcessedCurrency() {
-        return processedCurrency;
-    }
-
-    public PaymentStatus getPaymentStatus() {
-        return paymentStatus;
-    }
-
-    public DateTime getEffectiveDate() {
-        return effectiveDate;
-    }
-
-    public String getExtFirstPaymentRefId() {
-        return extFirstPaymentRefId;
-    }
-
-    public String getExtSecondPaymentRefId() {
-        return extSecondPaymentRefId;
-    }
-
-    public void setAccountId(final UUID accountId) {
-        this.accountId = accountId;
-    }
-
-    public void setInvoiceId(final UUID invoiceId) {
-        this.invoiceId = invoiceId;
+    public UUID getPaymentMethodId() {
+        return paymentMethodId;
     }
 
     public void setPaymentMethodId(final UUID paymentMethodId) {
         this.paymentMethodId = paymentMethodId;
     }
 
-    public void setAmount(final BigDecimal amount) {
-        this.amount = amount;
+    public String getExternalKey() {
+        return externalKey;
     }
 
-    public void setCurrency(final Currency currency) {
-        this.currency = currency;
+    public void setExternalKey(final String externalKey) {
+        this.externalKey = externalKey;
     }
 
-    public void setProcessedAmount(final BigDecimal processedAmount) {
-        this.processedAmount = processedAmount;
+    public String getStateName() {
+        return stateName;
     }
 
-    public void setProcessedCurrency(final Currency processedCurrency) {
-        this.processedCurrency = processedCurrency;
+    public void setStateName(final String stateName) {
+        this.stateName = stateName;
     }
 
-    public void setEffectiveDate(final DateTime effectiveDate) {
-        this.effectiveDate = effectiveDate;
+    public String getLastSuccessStateName() {
+        return lastSuccessStateName;
     }
 
-    public void setPaymentNumber(final Integer paymentNumber) {
-        this.paymentNumber = paymentNumber;
-    }
-
-    public void setPaymentStatus(final PaymentStatus paymentStatus) {
-        this.paymentStatus = paymentStatus;
-    }
-
-    public void setExtFirstPaymentRefId(final String extFirstPaymentRefId) {
-        this.extFirstPaymentRefId = extFirstPaymentRefId;
-    }
-
-    public void setExtSecondPaymentRefId(final String extSecondPaymentRefId) {
-        this.extSecondPaymentRefId = extSecondPaymentRefId;
+    public void setLastSuccessStateName(final String lastSuccessStateName) {
+        this.lastSuccessStateName = lastSuccessStateName;
     }
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder();
-        sb.append("PaymentModelDao");
-        sb.append("{accountId=").append(accountId);
-        sb.append(", invoiceId=").append(invoiceId);
-        sb.append(", paymentMethodId=").append(paymentMethodId);
-        sb.append(", amount=").append(amount);
-        sb.append(", currency=").append(currency);
-        sb.append(", effectiveDate=").append(effectiveDate);
+        final StringBuilder sb = new StringBuilder("PaymentModelDao{");
+        sb.append("accountId=").append(accountId);
         sb.append(", paymentNumber=").append(paymentNumber);
-        sb.append(", paymentStatus=").append(paymentStatus);
-        sb.append(", extFirstPaymentRefId='").append(extFirstPaymentRefId).append('\'');
-        sb.append(", extSecondPaymentRefId='").append(extSecondPaymentRefId).append('\'');
+        sb.append(", paymentMethodId=").append(paymentMethodId);
+        sb.append(", externalKey='").append(externalKey).append('\'');
+        sb.append(", stateName='").append(stateName).append('\'');
+        sb.append(", lastSuccessStateName='").append(lastSuccessStateName).append('\'');
+        sb.append(", createdDate=").append(createdDate);
+        sb.append(", updatedDate=").append(updatedDate);
         sb.append('}');
         return sb.toString();
     }
@@ -214,37 +140,19 @@ public class PaymentModelDao extends EntityBase implements EntityModelDao<Paymen
         if (accountId != null ? !accountId.equals(that.accountId) : that.accountId != null) {
             return false;
         }
-        if (amount != null ? !amount.equals(that.amount) : that.amount != null) {
+        if (stateName != null ? !stateName.equals(that.stateName) : that.stateName != null) {
             return false;
         }
-        if (currency != that.currency) {
+        if (lastSuccessStateName != null ? !lastSuccessStateName.equals(that.lastSuccessStateName) : that.lastSuccessStateName != null) {
             return false;
         }
-        if (processedAmount != null ? !processedAmount.equals(that.processedAmount) : that.processedAmount != null) {
-            return false;
-        }
-        if (processedCurrency != that.processedCurrency) {
-            return false;
-        }
-        if (effectiveDate != null ? !effectiveDate.equals(that.effectiveDate) : that.effectiveDate != null) {
-            return false;
-        }
-        if (extFirstPaymentRefId != null ? !extFirstPaymentRefId.equals(that.extFirstPaymentRefId) : that.extFirstPaymentRefId != null) {
-            return false;
-        }
-        if (extSecondPaymentRefId != null ? !extSecondPaymentRefId.equals(that.extSecondPaymentRefId) : that.extSecondPaymentRefId != null) {
-            return false;
-        }
-        if (invoiceId != null ? !invoiceId.equals(that.invoiceId) : that.invoiceId != null) {
+        if (externalKey != null ? !externalKey.equals(that.externalKey) : that.externalKey != null) {
             return false;
         }
         if (paymentMethodId != null ? !paymentMethodId.equals(that.paymentMethodId) : that.paymentMethodId != null) {
             return false;
         }
         if (paymentNumber != null ? !paymentNumber.equals(that.paymentNumber) : that.paymentNumber != null) {
-            return false;
-        }
-        if (paymentStatus != that.paymentStatus) {
             return false;
         }
         return true;
@@ -254,17 +162,11 @@ public class PaymentModelDao extends EntityBase implements EntityModelDao<Paymen
     public int hashCode() {
         int result = super.hashCode();
         result = 31 * result + (accountId != null ? accountId.hashCode() : 0);
-        result = 31 * result + (invoiceId != null ? invoiceId.hashCode() : 0);
-        result = 31 * result + (paymentMethodId != null ? paymentMethodId.hashCode() : 0);
-        result = 31 * result + (amount != null ? amount.hashCode() : 0);
-        result = 31 * result + (currency != null ? currency.hashCode() : 0);
-        result = 31 * result + (processedAmount != null ? processedAmount.hashCode() : 0);
-        result = 31 * result + (processedCurrency != null ? processedCurrency.hashCode() : 0);
-        result = 31 * result + (effectiveDate != null ? effectiveDate.hashCode() : 0);
         result = 31 * result + (paymentNumber != null ? paymentNumber.hashCode() : 0);
-        result = 31 * result + (paymentStatus != null ? paymentStatus.hashCode() : 0);
-        result = 31 * result + (extFirstPaymentRefId != null ? extFirstPaymentRefId.hashCode() : 0);
-        result = 31 * result + (extSecondPaymentRefId != null ? extSecondPaymentRefId.hashCode() : 0);
+        result = 31 * result + (paymentMethodId != null ? paymentMethodId.hashCode() : 0);
+        result = 31 * result + (externalKey != null ? externalKey.hashCode() : 0);
+        result = 31 * result + (stateName != null ? stateName.hashCode() : 0);
+        result = 31 * result + (lastSuccessStateName != null ? lastSuccessStateName.hashCode() : 0);
         return result;
     }
 
@@ -277,5 +179,4 @@ public class PaymentModelDao extends EntityBase implements EntityModelDao<Paymen
     public TableName getHistoryTableName() {
         return TableName.PAYMENT_HISTORY;
     }
-
 }

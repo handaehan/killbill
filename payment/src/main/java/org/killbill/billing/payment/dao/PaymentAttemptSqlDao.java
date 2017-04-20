@@ -16,33 +16,58 @@
 
 package org.killbill.billing.payment.dao;
 
+import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 
+import org.killbill.billing.callcontext.InternalCallContext;
+import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.util.audit.ChangeType;
+import org.killbill.billing.util.entity.Entity;
+import org.killbill.billing.util.entity.dao.Audited;
+import org.killbill.billing.util.entity.dao.EntitySqlDao;
+import org.killbill.billing.util.entity.dao.EntitySqlDaoStringTemplate;
 import org.skife.jdbi.v2.sqlobject.Bind;
 import org.skife.jdbi.v2.sqlobject.BindBean;
 import org.skife.jdbi.v2.sqlobject.SqlQuery;
 import org.skife.jdbi.v2.sqlobject.SqlUpdate;
-
-import org.killbill.billing.payment.api.PaymentAttempt;
-import org.killbill.billing.util.audit.ChangeType;
-import org.killbill.billing.callcontext.InternalCallContext;
-import org.killbill.billing.callcontext.InternalTenantContext;
-import org.killbill.billing.util.entity.dao.Audited;
-import org.killbill.billing.util.entity.dao.EntitySqlDao;
-import org.killbill.billing.util.entity.dao.EntitySqlDaoStringTemplate;
+import org.skife.jdbi.v2.sqlobject.customizers.Define;
 
 @EntitySqlDaoStringTemplate
-public interface PaymentAttemptSqlDao extends EntitySqlDao<PaymentAttemptModelDao, PaymentAttempt> {
+public interface PaymentAttemptSqlDao extends EntitySqlDao<PaymentAttemptModelDao, Entity> {
 
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
-    void updatePaymentAttemptStatus(@Bind("id") final String attemptId,
-                                    @Bind("processingStatus") final String processingStatus,
-                                    @Bind("gatewayErrorCode") final String gatewayErrorCode,
-                                    @Bind("gatewayErrorMsg") final String gatewayErrorMsg,
-                                    @BindBean final InternalCallContext context);
+    void updateAttempt(@Bind("id") final String attemptId,
+                       @Bind("transactionId") final String transactionId,
+                       @Bind("stateName") final String stateName,
+                       @BindBean final InternalCallContext context);
+
+    @SqlUpdate
+    @Audited(ChangeType.UPDATE)
+    void updateAttemptWithProperties(@Bind("id") final String attemptId,
+                                     @Bind("transactionId") final String transactionId,
+                                     @Bind("stateName") final String stateName,
+                                     @Bind("pluginProperties") final byte[] pluginProperties,
+                                     @BindBean final InternalCallContext context);
 
     @SqlQuery
-    List<PaymentAttemptModelDao> getByPaymentId(@Bind("paymentId") final String paymentId,
-                                                @BindBean final InternalTenantContext context);
+    List<PaymentAttemptModelDao> getByTransactionExternalKey(@Bind("transactionExternalKey") final String transactionExternalKey,
+                                                             @BindBean final InternalTenantContext context);
+
+    @SqlQuery
+    List<PaymentAttemptModelDao> getByPaymentExternalKey(@Bind("paymentExternalKey") final String paymentExternalKey,
+                                                         @BindBean final InternalTenantContext context);
+
+    @SqlQuery
+    Long getCountByStateNameAcrossTenants(@Bind("stateName") final String stateName,
+                                          @Bind("createdBeforeDate") final Date createdBeforeDate);
+
+    @SqlQuery
+    Iterator<PaymentAttemptModelDao> getByStateNameAcrossTenants(@Bind("stateName") final String stateName,
+                                                                 @Bind("createdBeforeDate") final Date createdBeforeDate,
+                                                                 @Bind("offset") final Long offset,
+                                                                 @Bind("rowCount") final Long rowCount,
+                                                                 @Define("ordering") final String ordering);
+
 }

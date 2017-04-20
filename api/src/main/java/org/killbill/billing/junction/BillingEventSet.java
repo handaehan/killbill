@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,12 +19,20 @@
 package org.killbill.billing.junction;
 
 import java.util.List;
+import java.util.Map;
 import java.util.SortedSet;
 import java.util.UUID;
 
+import org.killbill.billing.catalog.api.BillingMode;
+import org.killbill.billing.catalog.api.Usage;
+
 public interface BillingEventSet extends SortedSet<BillingEvent> {
 
-    public abstract boolean isAccountAutoInvoiceOff();
+    public boolean isAccountAutoInvoiceOff();
 
-    public abstract List<UUID> getSubscriptionIdsWithAutoInvoiceOff();
+    public BillingMode getRecurringBillingMode();
+
+    public List<UUID> getSubscriptionIdsWithAutoInvoiceOff();
+
+    public Map<String, Usage> getUsages();
 }

@@ -19,24 +19,26 @@ package org.killbill.billing.invoice.template.formatters;
 import java.math.BigDecimal;
 import java.text.NumberFormat;
 import java.util.Locale;
+import java.util.ResourceBundle;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
 import org.joda.time.format.DateTimeFormatter;
-
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.invoice.api.InvoiceItem;
 import org.killbill.billing.invoice.api.InvoiceItemType;
 import org.killbill.billing.invoice.api.formatters.InvoiceItemFormatter;
+import org.killbill.billing.invoice.api.formatters.ResourceBundleFactory;
+import org.killbill.billing.invoice.api.formatters.ResourceBundleFactory.ResourceBundleType;
+import org.killbill.billing.util.LocaleUtils;
 import org.killbill.billing.util.template.translation.DefaultCatalogTranslator;
 import org.killbill.billing.util.template.translation.Translator;
 import org.killbill.billing.util.template.translation.TranslatorConfig;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Strings;
-
-import static org.killbill.billing.util.DefaultAmountFormatter.round;
 
 /**
  * Format invoice item fields
@@ -49,17 +51,23 @@ public class DefaultInvoiceItemFormatter implements InvoiceItemFormatter {
     private final DateTimeFormatter dateFormatter;
     private final Locale locale;
 
-    public DefaultInvoiceItemFormatter(final TranslatorConfig config, final InvoiceItem item, final DateTimeFormatter dateFormatter, final Locale locale) {
+    public DefaultInvoiceItemFormatter(final TranslatorConfig config,
+                                       final InvoiceItem item,
+                                       final DateTimeFormatter dateFormatter,
+                                       final Locale locale,
+                                       final InternalTenantContext context,
+                                       final ResourceBundleFactory bundleFactory) {
         this.item = item;
         this.dateFormatter = dateFormatter;
         this.locale = locale;
-
-        this.translator = new DefaultCatalogTranslator(config);
+        final ResourceBundle bundle = bundleFactory.createBundle(locale, config.getCatalogBundlePath(), ResourceBundleType.CATALOG_TRANSLATION, context);
+        final ResourceBundle defaultBundle = bundleFactory.createBundle(LocaleUtils.toLocale(config.getDefaultLocale()), config.getCatalogBundlePath(), ResourceBundleType.CATALOG_TRANSLATION, context);
+        this.translator = new DefaultCatalogTranslator(bundle, defaultBundle);
     }
 
     @Override
     public BigDecimal getAmount() {
-        return round(Objects.firstNonNull(item.getAmount(), BigDecimal.ZERO));
+        return MoreObjects.firstNonNull(item.getAmount(), BigDecimal.ZERO);
     }
 
     @Override
@@ -81,7 +89,7 @@ public class DefaultInvoiceItemFormatter implements InvoiceItemFormatter {
 
     @Override
     public String getDescription() {
-        return Strings.nullToEmpty(item.getDescription());
+        return Strings.nullToEmpty(translator.getTranslation(item.getDescription()));
     }
 
     @Override
@@ -115,6 +123,11 @@ public class DefaultInvoiceItemFormatter implements InvoiceItemFormatter {
     }
 
     @Override
+    public UUID getChildAccountId() {
+        return item.getChildAccountId();
+    }
+
+    @Override
     public UUID getBundleId() {
         return item.getBundleId();
     }
@@ -126,12 +139,17 @@ public class DefaultInvoiceItemFormatter implements InvoiceItemFormatter {
 
     @Override
     public String getPlanName() {
-        return Strings.nullToEmpty(translator.getTranslation(locale, item.getPlanName()));
+        return Strings.nullToEmpty(translator.getTranslation(item.getPlanName()));
     }
 
     @Override
     public String getPhaseName() {
-        return Strings.nullToEmpty(translator.getTranslation(locale, item.getPhaseName()));
+        return Strings.nullToEmpty(translator.getTranslation(item.getPhaseName()));
+    }
+
+    @Override
+    public String getUsageName() {
+        return Strings.nullToEmpty(translator.getTranslation(item.getUsageName()));
     }
 
     @Override
@@ -151,7 +169,7 @@ public class DefaultInvoiceItemFormatter implements InvoiceItemFormatter {
 
     @Override
     public BigDecimal getRate() {
-        return round(BigDecimal.ZERO);
+        return BigDecimal.ZERO;
     }
 
     @Override
@@ -163,4 +181,5 @@ public class DefaultInvoiceItemFormatter implements InvoiceItemFormatter {
     public boolean matches(final Object other) {
         throw new UnsupportedOperationException();
     }
+
 }

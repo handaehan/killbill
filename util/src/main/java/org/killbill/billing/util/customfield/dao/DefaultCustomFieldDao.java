@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,6 +24,8 @@ import java.util.UUID;
 
 import javax.annotation.Nullable;
 
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.entity.dao.DefaultPaginationSqlDaoHelper.Ordering;
 import org.skife.jdbi.v2.IDBI;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +48,6 @@ import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.entity.dao.DefaultPaginationSqlDaoHelper.PaginationIteratorBuilder;
 import org.killbill.billing.util.entity.dao.EntityDaoBase;
-import org.killbill.billing.util.entity.dao.EntitySqlDao;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoTransactionWrapper;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoTransactionalJdbiWrapper;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoWrapperFactory;
@@ -61,8 +64,9 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
     private final PersistentBus bus;
 
     @Inject
-    public DefaultCustomFieldDao(final IDBI dbi, final Clock clock, final CacheControllerDispatcher controllerDispatcher, final NonEntityDao nonEntityDao, final PersistentBus bus) {
-        super(new EntitySqlDaoTransactionalJdbiWrapper(dbi, clock, controllerDispatcher, nonEntityDao), CustomFieldSqlDao.class);
+    public DefaultCustomFieldDao(final IDBI dbi, final Clock clock, final CacheControllerDispatcher controllerDispatcher,
+                                 final NonEntityDao nonEntityDao, final InternalCallContextFactory internalCallContextFactory, final PersistentBus bus) {
+        super(new EntitySqlDaoTransactionalJdbiWrapper(dbi, clock, controllerDispatcher, nonEntityDao, internalCallContextFactory), CustomFieldSqlDao.class);
         this.bus = bus;
     }
 
@@ -70,7 +74,7 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
     public List<CustomFieldModelDao> getCustomFieldsForObject(final UUID objectId, final ObjectType objectType, final InternalTenantContext context) {
         return transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<List<CustomFieldModelDao>>() {
             @Override
-            public List<CustomFieldModelDao> inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public List<CustomFieldModelDao> inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
                 return entitySqlDaoWrapperFactory.become(CustomFieldSqlDao.class).getCustomFieldsForObject(objectId, objectType, context);
             }
         });
@@ -92,7 +96,7 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
     public List<CustomFieldModelDao> getCustomFieldsForAccount(final InternalTenantContext context) {
         return transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<List<CustomFieldModelDao>>() {
             @Override
-            public List<CustomFieldModelDao> inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
+            public List<CustomFieldModelDao> inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
                 return entitySqlDaoWrapperFactory.become(CustomFieldSqlDao.class).getByAccountRecordId(context);
             }
         });
@@ -102,8 +106,14 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
     public void deleteCustomField(final UUID customFieldId, final InternalCallContext context) throws CustomFieldApiException {
         transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<Void>() {
             @Override
-            public Void inTransaction(final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory) throws Exception {
-                entitySqlDaoWrapperFactory.become(CustomFieldSqlDao.class).markTagAsDeleted(customFieldId.toString(), context);
+            public Void inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
+                final CustomFieldSqlDao sqlDao = entitySqlDaoWrapperFactory.become(CustomFieldSqlDao.class);
+
+                final CustomFieldModelDao customField = sqlDao.getById(customFieldId.toString(), context);
+                sqlDao.markTagAsDeleted(customFieldId.toString(), context);
+
+                postBusEventFromTransaction(customField, customField, ChangeType.DELETE, entitySqlDaoWrapperFactory, context);
+
                 return null;
             }
         });
@@ -117,7 +127,7 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
 
     @Override
     protected void postBusEventFromTransaction(final CustomFieldModelDao customField, final CustomFieldModelDao savedCustomField, final ChangeType changeType,
-                                               final EntitySqlDaoWrapperFactory<EntitySqlDao> entitySqlDaoWrapperFactory, final InternalCallContext context)
+                                               final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory, final InternalCallContext context)
             throws BillingExceptionBase {
 
         BusInternalEvent customFieldEvent = null;
@@ -135,9 +145,9 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
         }
 
         try {
-            bus.postFromTransaction(customFieldEvent, entitySqlDaoWrapperFactory.getSqlDao());
-        } catch (PersistentBus.EventBusException e) {
-            log.warn("Failed to post tag event for custom field " + customField.getId().toString(), e);
+            bus.postFromTransaction(customFieldEvent, entitySqlDaoWrapperFactory.getHandle().getConnection());
+        } catch (final PersistentBus.EventBusException e) {
+            log.warn("Failed to post tag event for customFieldId='{}'", customField.getId().toString(), e);
         }
 
     }
@@ -152,8 +162,8 @@ public class DefaultCustomFieldDao extends EntityDaoBase<CustomFieldModelDao, Cu
                                                   }
 
                                                   @Override
-                                                  public Iterator<CustomFieldModelDao> build(final CustomFieldSqlDao customFieldSqlDao, final Long limit, final InternalTenantContext context) {
-                                                      return customFieldSqlDao.search(searchKey, String.format("%%%s%%", searchKey), offset, limit, context);
+                                                  public Iterator<CustomFieldModelDao> build(final CustomFieldSqlDao customFieldSqlDao, final Long offset, final Long limit, final Ordering ordering, final InternalTenantContext context) {
+                                                      return customFieldSqlDao.search(searchKey, String.format("%%%s%%", searchKey), offset, limit, ordering.toString(), context);
                                                   }
                                               },
                                               offset,

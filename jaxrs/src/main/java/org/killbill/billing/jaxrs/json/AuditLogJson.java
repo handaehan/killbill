@@ -22,10 +22,12 @@ import org.killbill.billing.util.audit.AuditLog;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.annotations.ApiModelProperty;
 
 public class AuditLogJson {
 
     private final String changeType;
+    @ApiModelProperty(dataType = "org.joda.time.DateTime")
     private final DateTime changeDate;
     private final String changedBy;
     private final String reasonCode;

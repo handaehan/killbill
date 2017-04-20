@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,18 +19,13 @@
 package org.killbill.billing.entitlement.api;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-import org.mockito.Mockito;
-import org.testng.Assert;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
-
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
@@ -36,12 +33,19 @@ import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.entitlement.DefaultEntitlementService;
 import org.killbill.billing.entitlement.EntitlementTestSuiteNoDB;
+import org.killbill.billing.entitlement.EventsStream;
 import org.killbill.billing.junction.DefaultBlockingState;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseTransition;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseTransitionData;
 import org.killbill.billing.subscription.events.SubscriptionBaseEvent.EventType;
 import org.killbill.billing.subscription.events.user.ApiEventType;
+import org.mockito.Mockito;
+import org.testng.Assert;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.Test;
+
+import com.google.common.collect.ImmutableList;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;
@@ -49,24 +53,25 @@ import static org.testng.Assert.assertNull;
 public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteNoDB {
 
     private UUID bundleId;
+    private String bundleExternalKey;
 
     @BeforeClass(groups = "fast")
     protected void beforeClass() throws Exception {
         super.beforeClass();
         bundleId = UUID.randomUUID();
+        bundleExternalKey = bundleId.toString();
     }
 
     public class TestSubscriptionBundleTimeline extends DefaultSubscriptionBundleTimeline {
 
-        public TestSubscriptionBundleTimeline(final DateTimeZone accountTimeZone, final UUID accountId, final UUID bundleId, final String externalKey, final List<Entitlement> entitlements, final List<BlockingState> allBlockingStates) {
-            super(accountTimeZone, accountId, bundleId, externalKey, entitlements, allBlockingStates);
+        public TestSubscriptionBundleTimeline(final UUID accountId, final UUID bundleId, final String externalKey, final Iterable<Entitlement> entitlements) {
+            super(accountId, bundleId, externalKey, entitlements, internalCallContext);
         }
 
         public SubscriptionEvent createEvent(final UUID subscriptionId, final SubscriptionEventType type, final DateTime effectiveDate) {
             return new DefaultSubscriptionEvent(UUID.randomUUID(),
                                                 subscriptionId,
                                                 effectiveDate,
-                                                null,
                                                 type,
                                                 true,
                                                 true,
@@ -83,14 +88,14 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
                                                 null,
                                                 null,
                                                 null,
-                                                null);
+                                                internalCallContext);
 
         }
     }
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnInvalidOrder1() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.randomUUID();
@@ -100,7 +105,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_ENTITLEMENT, effectiveDate));
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_BILLING, effectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         Assert.assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
@@ -110,7 +115,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnInvalidOrder2() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.randomUUID();
@@ -120,7 +125,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_BILLING, effectiveDate));
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_ENTITLEMENT, effectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         Assert.assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
@@ -130,7 +135,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnInvalidOrder3() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.randomUUID();
@@ -140,7 +145,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_BILLING, effectiveDate));
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.START_ENTITLEMENT, effectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         Assert.assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
@@ -150,7 +155,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnInvalidOrderAndDifferentSubscriptionsSameDates1() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.fromString("60b64e0c-cefd-48c3-8de9-c731a9558165");
@@ -164,7 +169,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(otherSubscriptionId, SubscriptionEventType.STOP_BILLING, effectiveDate));
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_ENTITLEMENT, effectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
         Assert.assertEquals(events.get(0).getEntitlementId(), otherSubscriptionId);
@@ -177,7 +182,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnInvalidOrderAndDifferentSubscriptionsSameDates2() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.fromString("35b3b340-31b2-46ea-b062-e9fc9fab3bc9");
@@ -191,7 +196,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(otherSubscriptionId, SubscriptionEventType.STOP_BILLING, effectiveDate));
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_ENTITLEMENT, effectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         Assert.assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
@@ -204,7 +209,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnInvalidOrderAndDifferentSubscriptionsDates() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.randomUUID();
@@ -225,7 +230,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(otherSubscriptionId, SubscriptionEventType.PAUSE_ENTITLEMENT, otherEffectiveDate));
         events.add(timeline.createEvent(otherSubscriptionId, SubscriptionEventType.PAUSE_BILLING, otherEffectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         Assert.assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
@@ -242,7 +247,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testReOrderSubscriptionEventsOnCorrectOrder() {
-        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, null, new ArrayList<Entitlement>(), new ArrayList<BlockingState>());
+        final TestSubscriptionBundleTimeline timeline = new TestSubscriptionBundleTimeline(null, null, null, new ArrayList<Entitlement>());
 
         final List<SubscriptionEvent> events = new ArrayList<SubscriptionEvent>();
         final UUID subscriptionId = UUID.randomUUID();
@@ -252,7 +257,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_ENTITLEMENT, effectiveDate));
         events.add(timeline.createEvent(subscriptionId, SubscriptionEventType.STOP_BILLING, effectiveDate));
 
-        timeline.reOrderSubscriptionEventsOnSameDateByType(events);
+        SubscriptionEventOrdering.INSTANCE.reOrderSubscriptionEventsOnSameDateByType(events);
 
         Assert.assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         Assert.assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
@@ -261,38 +266,56 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
     }
 
     @Test(groups = "fast")
-    public void testOneEntitlementNoBlockingStates() throws CatalogApiException {
+    public void testOneSimpleEntitlement() throws CatalogApiException {
+        testOneSimpleEntitlementImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testOneSimpleEntitlementWithRegression() throws CatalogApiException {
+        testOneSimpleEntitlementImpl(true);
+    }
+
+
+    private void testOneSimpleEntitlementImpl(boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
         final UUID accountId = UUID.randomUUID();
-        final UUID bundleId = UUID.randomUUID();
         final String externalKey = "foo";
+
+        final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
         final UUID entitlementId = UUID.randomUUID();
 
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+            blockingStates.add(bsCreate);
+        }
+
 
         effectiveDate = effectiveDate.plusDays(30);
         clock.addDays(30);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial", "phase");
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial", "phase");
         allTransitions.add(tr2);
 
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
-        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, requestedDate, effectiveDate, clock.getUTCNow(), "phase", null);
+        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "phase", null);
         allTransitions.add(tr3);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, Collections.<BlockingState>emptyList());
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         assertEquals(timeline.getAccountId(), accountId);
         assertEquals(timeline.getBundleId(), bundleId);
@@ -312,12 +335,11 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(3).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
-        assertEquals(events.get(2).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
-        assertEquals(events.get(3).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
+        assertEquals(events.get(2).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(3).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
         assertEquals(events.get(2).getPrevPhase().getName(), "trial");
@@ -326,8 +348,94 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertNull(events.get(3).getNextPhase());
     }
 
+
+    @Test(groups="fast", enabled = true)
+    public void testOneSimpleEntitlementCancelImmediately() throws CatalogApiException {
+        testOneSimpleEntitlementCancelImmediatelyImpl(false);
+    }
+
+    @Test(groups="fast", enabled = true)
+    public void testOneSimpleEntitlementCancelImmediatelyWithRegression() throws CatalogApiException {
+        testOneSimpleEntitlementCancelImmediatelyImpl(true);
+    }
+
+
+    private void testOneSimpleEntitlementCancelImmediatelyImpl(boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
+
+        clock.setDay(new LocalDate(2013, 1, 1));
+
+        final UUID accountId = UUID.randomUUID();
+        final String externalKey = "foo";
+
+        final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
+
+        final UUID entitlementId = UUID.randomUUID();
+
+        final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
+
+        DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
+        allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+            blockingStates.add(bsCreate);
+        }
+
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "trial", null);
+        allTransitions.add(tr2);
+
+        final BlockingState bsCancel = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+        blockingStates.add(bsCancel);
+
+
+
+        final List<Entitlement> entitlements = new ArrayList<Entitlement>();
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
+        entitlements.add(entitlement);
+
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
+
+        assertEquals(timeline.getAccountId(), accountId);
+        assertEquals(timeline.getBundleId(), bundleId);
+        assertEquals(timeline.getExternalKey(), externalKey);
+
+        final List<SubscriptionEvent> events = timeline.getSubscriptionEvents();
+        assertEquals(events.size(), 4);
+
+        assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
+        assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
+        assertEquals(events.get(2).getSubscriptionEventType(), SubscriptionEventType.STOP_ENTITLEMENT);
+        assertEquals(events.get(3).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
+
+        assertNull(events.get(0).getPrevPhase());
+        assertEquals(events.get(0).getNextPhase().getName(), "trial");
+
+        assertNull(events.get(1).getPrevPhase());
+        assertEquals(events.get(1).getNextPhase().getName(), "trial");
+
+        assertEquals(events.get(2).getPrevPhase().getName(), "trial");
+        assertNull(events.get(2).getNextPhase());
+
+        assertEquals(events.get(3).getPrevPhase().getName(), "trial");
+        assertNull(events.get(3).getNextPhase());
+    }
+
+
     @Test(groups = "fast")
     public void testCancelBundleBeforeSubscription() throws CatalogApiException {
+        testCancelBundleBeforeSubscriptionImpl(false);
+    }
+    @Test(groups = "fast")
+    public void testCancelBundleBeforeSubscriptionWithRegression() throws CatalogApiException {
+        testCancelBundleBeforeSubscriptionImpl(true);
+    }
+
+    private void testCancelBundleBeforeSubscriptionImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -340,30 +448,36 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+            blockingStates.add(bsCreate);
+        }
 
         // Block the bundle before the subscription
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
 
         blockingStates.add(bs1);
 
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, requestedDate, effectiveDate, clock.getUTCNow(), "trial", null);
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "trial", null);
         allTransitions.add(tr2);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         assertEquals(timeline.getAccountId(), accountId);
         assertEquals(timeline.getBundleId(), bundleId);
@@ -383,22 +497,29 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(3).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
         assertEquals(events.get(2).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(3).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(3).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
-        assertEquals(events.get(2).getPrevPhase().getName(), "trial");
-        assertNull(events.get(2).getNextPhase());
         assertEquals(events.get(3).getPrevPhase().getName(), "trial");
         assertNull(events.get(3).getNextPhase());
     }
 
     @Test(groups = "fast", description = "Test for https://github.com/killbill/killbill/issues/135")
     public void testOneEntitlementWithPauseResume() throws CatalogApiException {
+        testOneEntitlementWithPauseResumeImpl(false);
+    }
+
+    @Test(groups = "fast", description = "Test for https://github.com/killbill/killbill/issues/135")
+    public void testOneEntitlementWithPauseResumeWithRegression() throws CatalogApiException {
+        testOneEntitlementWithPauseResumeImpl(true);
+    }
+
+
+    private void testOneEntitlementWithPauseResumeImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -411,21 +532,29 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
+
 
         effectiveDate = effectiveDate.plusDays(30);
         clock.addDays(30);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial", "phase");
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial", "phase");
         allTransitions.add(tr2);
 
         effectiveDate = effectiveDate.plusDays(12);
         clock.addDays(12);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            "NothingUseful1", DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
 
         blockingStates.add(bs1);
 
@@ -433,7 +562,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(42);
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            "NothingUseful2", DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
 
         blockingStates.add(bs2);
 
@@ -442,7 +571,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final String service = "boo-service-which-will-pause-billing";
         final BlockingState bs3 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            "NothingUseful3", service,
-                                                           false, false, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 2L);
 
         blockingStates.add(bs3);
 
@@ -450,15 +579,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(15);
         final BlockingState bs4 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            "NothingUseful4", service,
-                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 3L);
 
         blockingStates.add(bs4);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         assertEquals(timeline.getAccountId(), accountId);
         assertEquals(timeline.getBundleId(), bundleId);
@@ -491,20 +620,19 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(8).getSubscriptionEventType(), SubscriptionEventType.RESUME_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
-        assertEquals(events.get(2).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(2).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
 
         assertEquals(events.get(3).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(4).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(4).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
         assertEquals(events.get(5).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(6).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(6).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertEquals(events.get(7).getServiceName(), service);
         assertEquals(events.get(8).getServiceName(), service);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
 
@@ -527,6 +655,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast", description = "Test for https://github.com/killbill/killbill/issues/147 and https://github.com/killbill/killbill/issues/148")
     public void testOneEntitlementWithOverduePauseThenCancel() throws CatalogApiException {
+        testOneEntitlementWithOverduePauseThenCancelImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testOneEntitlementWithOverduePauseThenCancelWithRegression() throws CatalogApiException {
+        testOneEntitlementWithOverduePauseThenCancelImpl(true);
+    }
+
+    private void testOneEntitlementWithOverduePauseThenCancelImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -539,14 +676,21 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
 
         effectiveDate = effectiveDate.plusDays(30);
         clock.addDays(30);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial", "phase");
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial", "phase");
         allTransitions.add(tr2);
 
         final String overdueService = "overdue-service";
@@ -554,7 +698,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(12);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), accountId, BlockingStateType.ACCOUNT,
                                                            "ODE1", overdueService,
-                                                           true, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
 
         blockingStates.add(bs1);
 
@@ -562,7 +706,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(42);
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), accountId, BlockingStateType.ACCOUNT,
                                                            "ODE2", overdueService,
-                                                           true, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
 
         blockingStates.add(bs2);
 
@@ -570,7 +714,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(15);
         final BlockingState bs3 = new DefaultBlockingState(UUID.randomUUID(), accountId, BlockingStateType.ACCOUNT,
                                                            "ODE3", overdueService,
-                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 2L);
 
         blockingStates.add(bs3);
 
@@ -578,7 +722,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(15);
         final BlockingState bs4 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 3L);
 
         blockingStates.add(bs4);
 
@@ -586,18 +730,18 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(1);
         final BlockingState bs5 = new DefaultBlockingState(UUID.randomUUID(), accountId, BlockingStateType.ACCOUNT,
                                                            "ODE4", overdueService,
-                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 4L);
 
         blockingStates.add(bs5);
         // Note: cancellation event and ODE4 at the same effective date (see https://github.com/killbill/killbill/issues/148)
-        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, effectiveDate, clock.getUTCNow(), "phase", null);
+        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "phase", null);
         allTransitions.add(tr3);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         assertEquals(timeline.getAccountId(), accountId);
         assertEquals(timeline.getBundleId(), bundleId);
@@ -634,9 +778,9 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(9).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
-        assertEquals(events.get(2).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(2).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
 
         assertEquals(events.get(3).getServiceName(), overdueService);
         assertEquals(events.get(4).getServiceName(), overdueService);
@@ -646,10 +790,9 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(7).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
 
         assertEquals(events.get(8).getServiceName(), overdueService);
-        assertEquals(events.get(9).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(9).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
 
@@ -676,6 +819,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testOneEntitlementWithInitialBlockingState() throws CatalogApiException {
+        testOneEntitlementWithInitialBlockingStateImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testOneEntitlementWithInitialBlockingStateWithRegression() throws CatalogApiException {
+        testOneEntitlementWithInitialBlockingStateImpl(true);
+    }
+
+    private void testOneEntitlementWithInitialBlockingStateImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -689,39 +841,46 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, clock.getUTCNow(), clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, clock.getUTCNow(), clock.getUTCNow(), clock.getUTCNow(), 0L);
 
         blockingStates.add(bs1);
 
         clock.addDays(1);
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
 
         effectiveDate = effectiveDate.plusDays(30);
         clock.addDays(30);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial", "phase");
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial", "phase");
         allTransitions.add(tr2);
 
         final String service = "boo";
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            "NothingUseful", service,
-                                                           false, false, false, clock.getUTCNow(), clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, false, clock.getUTCNow(), clock.getUTCNow(), clock.getUTCNow(), 1L);
 
         blockingStates.add(bs2);
 
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
-        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, requestedDate, effectiveDate, clock.getUTCNow(), "phase", null);
+        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "phase", null);
         allTransitions.add(tr3);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         assertEquals(timeline.getAccountId(), accountId);
         assertEquals(timeline.getBundleId(), bundleId);
@@ -743,13 +902,12 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(4).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
-        assertEquals(events.get(2).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
+        assertEquals(events.get(2).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
         assertEquals(events.get(3).getServiceName(), service);
-        assertEquals(events.get(4).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(4).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
         assertEquals(events.get(2).getPrevPhase().getName(), "trial");
@@ -762,6 +920,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testOneEntitlementWithBlockingStatesSubscription() throws CatalogApiException {
+        testOneEntitlementWithBlockingStatesSubscriptionImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testOneEntitlementWithBlockingStatesSubscriptionWithRegression() throws CatalogApiException {
+        testOneEntitlementWithBlockingStatesSubscriptionImpl(true);
+    }
+
+    private void testOneEntitlementWithBlockingStatesSubscriptionImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -774,38 +941,45 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
 
         effectiveDate = effectiveDate.plusDays(30);
         clock.addDays(30);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial", "phase");
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial", "phase");
         allTransitions.add(tr2);
 
         effectiveDate = effectiveDate.plusDays(5);
         clock.addDays(5);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
         blockingStates.add(bs1);
 
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
-        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, requestedDate, effectiveDate, clock.getUTCNow(), "phase", null);
+        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "phase", null);
         allTransitions.add(tr3);
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
 
         blockingStates.add(bs2);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         final List<SubscriptionEvent> events = timeline.getSubscriptionEvents();
         assertEquals(events.size(), 6);
@@ -825,14 +999,13 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(5).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
-        assertEquals(events.get(2).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
+        assertEquals(events.get(2).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
         assertEquals(events.get(3).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
         assertEquals(events.get(4).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(5).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(5).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
 
@@ -850,11 +1023,19 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testWithMultipleEntitlements() throws CatalogApiException {
+        testWithMultipleEntitlementsImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testWithMultipleEntitlementsWithRegression() throws CatalogApiException {
+        testWithMultipleEntitlementsImpl(true);
+    }
+
+    private void testWithMultipleEntitlementsImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
         final UUID accountId = UUID.randomUUID();
-        final UUID bundleId = UUID.randomUUID();
         final String externalKey = "foo";
 
         final UUID entitlementId1 = UUID.fromString("cf5a597a-cf15-45d3-8f02-95371be7f927");
@@ -862,48 +1043,65 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
         final List<SubscriptionBaseTransition> allTransitions1 = new ArrayList<SubscriptionBaseTransition>();
         final List<SubscriptionBaseTransition> allTransitions2 = new ArrayList<SubscriptionBaseTransition>();
-        final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
+        final List<BlockingState> blockingStatesEnt1 = new ArrayList<BlockingState>();
+        final List<BlockingState> blockingStatesEnt2 = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition ent1Tr1 = createTransition(entitlementId1, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial1");
+        final SubscriptionBaseTransition ent1Tr1 = createTransition(entitlementId1, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial1");
         allTransitions1.add(ent1Tr1);
 
-        effectiveDate = effectiveDate.plusDays(15);
-        clock.addDays(15);
-        final SubscriptionBaseTransition ent2Tr1 = createTransition(entitlementId2, EventType.API_USER, ApiEventType.TRANSFER, requestedDate, effectiveDate, clock.getUTCNow(), null, "phase2");
-        allTransitions2.add(ent2Tr1);
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId1, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStatesEnt1.add(bsCreate);
+        }
 
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
-        final SubscriptionBaseTransition ent1Tr2 = createTransition(entitlementId1, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial1", "phase1");
+        final SubscriptionBaseTransition ent2Tr1 = createTransition(entitlementId2, EventType.API_USER, ApiEventType.TRANSFER, effectiveDate, clock.getUTCNow(), null, "phase2");
+        allTransitions2.add(ent2Tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X ) {
+            final BlockingState bsCreate2 = new DefaultBlockingState(UUID.randomUUID(), entitlementId2, BlockingStateType.SUBSCRIPTION,
+                                                                     DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStatesEnt2.add(bsCreate2);
+        }
+
+        effectiveDate = effectiveDate.plusDays(15);
+        clock.addDays(15);
+        final SubscriptionBaseTransition ent1Tr2 = createTransition(entitlementId1, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial1", "phase1");
         allTransitions1.add(ent1Tr2);
 
         effectiveDate = effectiveDate.plusDays(5);
         clock.addDays(5);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
-        blockingStates.add(bs1);
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+        blockingStatesEnt1.add(bs1);
+        blockingStatesEnt2.add(bs1);
 
         effectiveDate = effectiveDate.plusDays(15);
         clock.addDays(15);
-        final SubscriptionBaseTransition ent1Tr3 = createTransition(entitlementId1, EventType.API_USER, ApiEventType.CANCEL, requestedDate, effectiveDate, clock.getUTCNow(), "phase1", null);
+        final SubscriptionBaseTransition ent1Tr3 = createTransition(entitlementId1, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "phase1", null);
         allTransitions1.add(ent1Tr3);
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), entitlementId1, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
 
-        blockingStates.add(bs2);
+        blockingStatesEnt1.add(bs2);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement1 = createEntitlement(entitlementId1, allTransitions1);
+        final Entitlement entitlement1 = createEntitlement(entitlementId1, allTransitions1, blockingStatesEnt1);
         entitlements.add(entitlement1);
 
-        final Entitlement entitlement2 = createEntitlement(entitlementId2, allTransitions2);
+        final Entitlement entitlement2 = createEntitlement(entitlementId2, allTransitions2, blockingStatesEnt2);
         entitlements.add(entitlement2);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         final List<SubscriptionEvent> events = timeline.getSubscriptionEvents();
         assertEquals(events.size(), 9);
@@ -935,25 +1133,27 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(8).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
         assertEquals(events.get(2).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(3).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(3).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
-        assertEquals(events.get(4).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(4).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
 
         assertEquals(events.get(5).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
         assertEquals(events.get(6).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
 
         assertEquals(events.get(7).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(8).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(8).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
         assertEquals(events.get(0).getNextPhase().getName(), "trial1");
+
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial1");
 
         assertNull(events.get(2).getPrevPhase());
         assertEquals(events.get(2).getNextPhase().getName(), "phase2");
+
         assertNull(events.get(3).getPrevPhase());
         assertEquals(events.get(3).getNextPhase().getName(), "phase2");
 
@@ -975,6 +1175,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast")
     public void testWithOverdueOffline() throws CatalogApiException {
+        testWithOverdueOfflineImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testWithOverdueOfflineWithRegression() throws CatalogApiException {
+        testWithOverdueOfflineImpl(true);
+    }
+
+    private void testWithOverdueOfflineImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -988,39 +1197,66 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 23, 11, 8, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
 
         effectiveDate = effectiveDate.plusDays(30);
         clock.addDays(30);
-        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, requestedDate, effectiveDate, clock.getUTCNow(), "trial", "phase");
+        final SubscriptionBaseTransition tr2 = createTransition(entitlementId, EventType.PHASE, null, effectiveDate, clock.getUTCNow(), "trial", "phase");
         allTransitions.add(tr2);
 
         effectiveDate = effectiveDate.plusDays(40); // 2013-03-12
         clock.addDays(40);
-        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, requestedDate, effectiveDate, clock.getUTCNow(), "phase", null);
+        final SubscriptionBaseTransition tr3 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CANCEL, effectiveDate, clock.getUTCNow(), "phase", null);
         allTransitions.add(tr3);
+
+        // Verify the timeline without the blocking state events
+        final ImmutableList<Entitlement> entitlementsWithoutBlockingStates = ImmutableList.<Entitlement>of(createEntitlement(entitlementId, allTransitions, blockingStates));
+        final List<SubscriptionEvent> eventsWithoutBlockingStates = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlementsWithoutBlockingStates, internalCallContext).getSubscriptionEvents();
+        assertEquals(eventsWithoutBlockingStates.size(), 4);
+        assertEquals(eventsWithoutBlockingStates.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
+        assertEquals(eventsWithoutBlockingStates.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
+        assertEquals(eventsWithoutBlockingStates.get(2).getSubscriptionEventType(), SubscriptionEventType.PHASE);
+        assertEquals(eventsWithoutBlockingStates.get(3).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         final String service = "overdue-service";
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.ACCOUNT,
                                                            "OFFLINE", service,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
 
         blockingStates.add(bs1);
 
+        // Verify the timeline with the overdue event blocking the entitlement
+        final ImmutableList<Entitlement> entitlementsWithOverdueEvent = ImmutableList.<Entitlement>of(createEntitlement(entitlementId, allTransitions, blockingStates));
+        final List<SubscriptionEvent> eventsWithOverdueEvent = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlementsWithOverdueEvent, internalCallContext).getSubscriptionEvents();
+        assertEquals(eventsWithOverdueEvent.size(), 5);
+        assertEquals(eventsWithOverdueEvent.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
+        assertEquals(eventsWithOverdueEvent.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
+        assertEquals(eventsWithOverdueEvent.get(2).getSubscriptionEventType(), SubscriptionEventType.PHASE);
+        assertEquals(eventsWithOverdueEvent.get(3).getSubscriptionEventType(), SubscriptionEventType.PAUSE_ENTITLEMENT);
+        assertEquals(eventsWithOverdueEvent.get(4).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
+
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
 
         blockingStates.add(bs2);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions,  blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        // Verify the timeline with both the overdue event and the entitlement cancel event
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         assertEquals(timeline.getAccountId(), accountId);
         assertEquals(timeline.getBundleId(), bundleId);
@@ -1039,19 +1275,18 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(0).getSubscriptionEventType(), SubscriptionEventType.START_ENTITLEMENT);
         assertEquals(events.get(1).getSubscriptionEventType(), SubscriptionEventType.START_BILLING);
         assertEquals(events.get(2).getSubscriptionEventType(), SubscriptionEventType.PHASE);
-        assertEquals(events.get(3).getSubscriptionEventType(), SubscriptionEventType.SERVICE_STATE_CHANGE);
+        assertEquals(events.get(3).getSubscriptionEventType(), SubscriptionEventType.PAUSE_ENTITLEMENT);
         assertEquals(events.get(4).getSubscriptionEventType(), SubscriptionEventType.STOP_ENTITLEMENT);
         assertEquals(events.get(5).getSubscriptionEventType(), SubscriptionEventType.STOP_BILLING);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
-        assertEquals(events.get(2).getServiceName(), DefaultSubscriptionBundleTimeline.ENT_BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
+        assertEquals(events.get(2).getServiceName(), EntitlementOrderingBase.ENT_BILLING_SERVICE_NAME);
         assertEquals(events.get(3).getServiceName(), service);
         assertEquals(events.get(4).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(5).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(5).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
 
@@ -1059,7 +1294,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(2).getNextPhase().getName(), "phase");
 
         assertEquals(events.get(3).getPrevPhase().getName(), "phase");
-        assertNull(events.get(3).getNextPhase());
+        assertEquals(events.get(3).getNextPhase().getName(), "phase");
         assertEquals(events.get(4).getPrevPhase().getName(), "phase");
         assertNull(events.get(4).getNextPhase());
 
@@ -1069,6 +1304,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast", description = "Test for https://github.com/killbill/killbill/issues/134")
     public void testRemoveOverlappingBlockingStates() throws CatalogApiException {
+        testRemoveOverlappingBlockingStatesImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testRemoveOverlappingBlockingStatesWithRegression() throws CatalogApiException {
+        testRemoveOverlappingBlockingStatesImpl(true);
+    }
+
+    public void testRemoveOverlappingBlockingStatesImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -1081,24 +1325,31 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
 
         // Overlapping ENT_STATE_BLOCKED - should merge
         effectiveDate = effectiveDate.plusDays(5);
         clock.addDays(5);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
         blockingStates.add(bs1);
 
         effectiveDate = effectiveDate.plusDays(1);
         clock.addDays(1);
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
 
         blockingStates.add(bs2);
 
@@ -1107,20 +1358,20 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(1);
         final BlockingState bs3 = new DefaultBlockingState(UUID.randomUUID(), accountId, BlockingStateType.ACCOUNT,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 2L);
 
         blockingStates.add(bs3);
         final BlockingState bs4 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_CANCELLED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 3L);
 
         blockingStates.add(bs4);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         final List<SubscriptionEvent> events = timeline.getSubscriptionEvents();
         assertEquals(events.size(), 4);
@@ -1136,12 +1387,11 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(3).getSubscriptionEventType(), SubscriptionEventType.STOP_ENTITLEMENT);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
         assertEquals(events.get(2).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
         assertEquals(events.get(3).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
 
@@ -1154,6 +1404,15 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
 
     @Test(groups = "fast", description = "Test for https://github.com/killbill/killbill/issues/149")
     public void testVariousBlockingStatesAtTheSameEffectiveDate() throws CatalogApiException {
+        testVariousBlockingStatesAtTheSameEffectiveDateImpl(false);
+    }
+
+    @Test(groups = "fast")
+    public void testVariousBlockingStatesAtTheSameEffectiveDateWithRegression() throws CatalogApiException {
+        testVariousBlockingStatesAtTheSameEffectiveDateImpl(true);
+    }
+
+    private void testVariousBlockingStatesAtTheSameEffectiveDateImpl(final boolean regressionFlagForOlderVersionThan_0_17_X) throws CatalogApiException {
         clock.setDay(new LocalDate(2013, 1, 1));
 
         final DateTimeZone accountTimeZone = DateTimeZone.UTC;
@@ -1166,22 +1425,29 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         final List<SubscriptionBaseTransition> allTransitions = new ArrayList<SubscriptionBaseTransition>();
         final List<BlockingState> blockingStates = new ArrayList<BlockingState>();
 
-        final DateTime requestedDate = new DateTime();
         DateTime effectiveDate = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
-        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, requestedDate, effectiveDate, clock.getUTCNow(), null, "trial");
+        final SubscriptionBaseTransition tr1 = createTransition(entitlementId, EventType.API_USER, ApiEventType.CREATE, effectiveDate, clock.getUTCNow(), null, "trial");
         allTransitions.add(tr1);
+
+        if (!regressionFlagForOlderVersionThan_0_17_X) {
+            final BlockingState bsCreate = new DefaultBlockingState(UUID.randomUUID(), entitlementId, BlockingStateType.SUBSCRIPTION,
+                                                                    DefaultEntitlementApi.ENT_STATE_START, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                    false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
+
+            blockingStates.add(bsCreate);
+        }
 
         // 2013-02-10
         effectiveDate = effectiveDate.plusDays(40);
         clock.addDays(40);
         final BlockingState bs1 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 0L);
         blockingStates.add(bs1);
         // Same timestamp on purpose
         final BlockingState bs2 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_CLEAR, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 1L);
         blockingStates.add(bs2);
 
         // 2013-02-20
@@ -1189,7 +1455,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(10);
         final BlockingState bs3 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_BLOCKED, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           true, true, true, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 2L);
         blockingStates.add(bs3);
 
         // 2013-03-02
@@ -1197,7 +1463,7 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(10);
         final BlockingState bs4 = new DefaultBlockingState(UUID.randomUUID(), bundleId, BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                            DefaultEntitlementApi.ENT_STATE_CLEAR, DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME,
-                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 3L);
         blockingStates.add(bs4);
 
         final String overdueService = "overdue-service";
@@ -1206,14 +1472,14 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         clock.addDays(2);
         final BlockingState bs5 = new DefaultBlockingState(UUID.randomUUID(), accountId, BlockingStateType.ACCOUNT,
                                                            "OD1", overdueService,
-                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow());
+                                                           false, false, false, effectiveDate, clock.getUTCNow(), clock.getUTCNow(), 4L);
         blockingStates.add(bs5);
 
         final List<Entitlement> entitlements = new ArrayList<Entitlement>();
-        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions);
+        final Entitlement entitlement = createEntitlement(entitlementId, allTransitions, blockingStates);
         entitlements.add(entitlement);
 
-        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountTimeZone, accountId, bundleId, externalKey, entitlements, blockingStates);
+        final SubscriptionBundleTimeline timeline = new DefaultSubscriptionBundleTimeline(accountId, bundleId, externalKey, entitlements, internalCallContext);
 
         final List<SubscriptionEvent> events = timeline.getSubscriptionEvents();
         assertEquals(events.size(), 11);
@@ -1248,22 +1514,21 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(10).getSubscriptionEventType(), SubscriptionEventType.SERVICE_STATE_CHANGE);
 
         assertEquals(events.get(0).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(1).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(1).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertEquals(events.get(2).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(3).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(3).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
         assertEquals(events.get(4).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(5).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(5).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertEquals(events.get(6).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(7).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(7).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
         assertEquals(events.get(8).getServiceName(), DefaultEntitlementService.ENTITLEMENT_SERVICE_NAME);
-        assertEquals(events.get(9).getServiceName(), DefaultSubscriptionBundleTimeline.BILLING_SERVICE_NAME);
+        assertEquals(events.get(9).getServiceName(), EntitlementOrderingBase.BILLING_SERVICE_NAME);
 
         assertEquals(events.get(10).getServiceName(), overdueService);
 
         assertNull(events.get(0).getPrevPhase());
-        assertEquals(events.get(0).getNextPhase().getName(), "trial");
         assertNull(events.get(1).getPrevPhase());
         assertEquals(events.get(1).getNextPhase().getName(), "trial");
 
@@ -1289,20 +1554,24 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         assertEquals(events.get(10).getNextPhase().getName(), "trial");
     }
 
-    private Entitlement createEntitlement(final UUID entitlementId, final List<SubscriptionBaseTransition> allTransitions) {
+    private Entitlement createEntitlement(final UUID entitlementId, final List<SubscriptionBaseTransition> allTransitions, final Collection<BlockingState> blockingStates) {
         final DefaultEntitlement result = Mockito.mock(DefaultEntitlement.class);
         Mockito.when(result.getId()).thenReturn(entitlementId);
+
+        final EventsStream eventsStream = Mockito.mock(EventsStream.class);
+        Mockito.when(eventsStream.getBlockingStates()).thenReturn(blockingStates);
+        Mockito.when(result.getEventsStream()).thenReturn(eventsStream);
 
         final SubscriptionBase base = Mockito.mock(SubscriptionBase.class);
         Mockito.when(base.getAllTransitions()).thenReturn(allTransitions);
         Mockito.when(result.getSubscriptionBase()).thenReturn(base);
+        Mockito.when(result.getSubscriptionBase().getStartDate()).thenReturn(new DateTime(DateTimeZone.UTC));
         return result;
     }
 
     private SubscriptionBaseTransition createTransition(final UUID entitlementId,
                                                         final EventType eventType,
                                                         final ApiEventType apiEventType,
-                                                        final DateTime requestedDate,
                                                         final DateTime effectiveDate,
                                                         final DateTime createdDate,
                                                         final String prevPhaseName,
@@ -1359,9 +1628,9 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
         return new SubscriptionBaseTransitionData(UUID.randomUUID(),
                                                   entitlementId,
                                                   bundleId,
+                                                  bundleExternalKey,
                                                   eventType,
                                                   apiEventType,
-                                                  requestedDate,
                                                   effectiveDate,
                                                   null,
                                                   null,
@@ -1372,9 +1641,11 @@ public class TestDefaultSubscriptionBundleTimeline extends EntitlementTestSuiteN
                                                   null,
                                                   null,
                                                   null,
+                                                  null,
                                                   nextPlan,
                                                   nextPhase,
                                                   nextPriceList,
+                                                  null,
                                                   1L,
                                                   createdDate,
                                                   UUID.randomUUID(),

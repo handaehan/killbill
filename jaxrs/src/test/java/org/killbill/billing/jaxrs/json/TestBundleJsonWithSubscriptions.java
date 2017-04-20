@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,16 +18,16 @@
 
 package org.killbill.billing.jaxrs.json;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
 import org.joda.time.LocalDate;
+import org.killbill.billing.catalog.api.BillingPeriod;
+import org.killbill.billing.jaxrs.JaxrsTestSuiteNoDB;
+import org.killbill.billing.jaxrs.json.SubscriptionJson.EventSubscriptionJson;
 import org.testng.Assert;
 import org.testng.annotations.Test;
-
-import org.killbill.billing.catalog.api.BillingPeriod;
-import org.killbill.billing.jaxrs.json.SubscriptionJson.EventSubscriptionJson;
-import org.killbill.billing.jaxrs.JaxrsTestSuiteNoDB;
 
 import com.google.common.collect.ImmutableList;
 
@@ -35,19 +37,50 @@ public class TestBundleJsonWithSubscriptions extends JaxrsTestSuiteNoDB {
 
     @Test(groups = "fast")
     public void testJson() throws Exception {
-
         final String someUUID = UUID.randomUUID().toString();
         final UUID bundleId = UUID.randomUUID();
         final String externalKey = UUID.randomUUID().toString();
         final List<AuditLogJson> auditLogs = createAuditLogsJson(clock.getUTCNow());
 
-        EventSubscriptionJson event = new EventSubscriptionJson(someUUID, BillingPeriod.NO_BILLING_PERIOD.toString(), new LocalDate(), new LocalDate(), "product", "priceList", "eventType", "phase", null);
-        final SubscriptionJson subscription = new SubscriptionJson(someUUID, someUUID, someUUID, externalKey,
-                                                                                       new LocalDate(), someUUID, someUUID, someUUID, someUUID, new LocalDate(), new LocalDate(),
-                                                                                       new LocalDate(), new LocalDate(),
-                                                                                       ImmutableList.<EventSubscriptionJson>of(event), null, null, auditLogs);
+        final EventSubscriptionJson event = new EventSubscriptionJson(UUID.randomUUID().toString(),
+                                                                      BillingPeriod.NO_BILLING_PERIOD.toString(),
+                                                                      new LocalDate(),
+                                                                      UUID.randomUUID().toString(),
+                                                                      UUID.randomUUID().toString(),
+                                                                      UUID.randomUUID().toString(),
+                                                                      UUID.randomUUID().toString(),
+                                                                      true,
+                                                                      false,
+                                                                      UUID.randomUUID().toString(),
+                                                                      UUID.randomUUID().toString(),
+                                                                      UUID.randomUUID().toString(),
+                                                                      null);
 
-        final BundleJson bundleJson = new BundleJson(someUUID, bundleId.toString(), externalKey, ImmutableList.<SubscriptionJson>of(subscription), auditLogs);
+        final PhasePriceOverrideJson priceOverride = new PhasePriceOverrideJson(null, null, "somePhaseType", BigDecimal.ONE, null);
+
+        final SubscriptionJson subscription = new SubscriptionJson(UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   externalKey,
+                                                                   new LocalDate(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   UUID.randomUUID().toString(),
+                                                                   new LocalDate(),
+                                                                   new LocalDate(),
+                                                                   new LocalDate(),
+                                                                   new LocalDate(),
+                                                                   null,
+                                                                   ImmutableList.<EventSubscriptionJson>of(event),
+                                                                   ImmutableList.of(priceOverride),
+                                                                   auditLogs);
+
+        final BundleJson bundleJson = new BundleJson(someUUID, bundleId.toString(), externalKey, ImmutableList.<SubscriptionJson>of(subscription), null, auditLogs);
         Assert.assertEquals(bundleJson.getBundleId(), bundleId.toString());
         Assert.assertEquals(bundleJson.getExternalKey(), externalKey);
         Assert.assertEquals(bundleJson.getSubscriptions().size(), 1);

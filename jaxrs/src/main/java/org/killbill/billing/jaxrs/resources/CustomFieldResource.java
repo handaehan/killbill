@@ -30,10 +30,10 @@ import javax.ws.rs.core.Response;
 
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.account.api.AccountUserApi;
-import org.killbill.clock.Clock;
 import org.killbill.billing.jaxrs.json.CustomFieldJson;
 import org.killbill.billing.jaxrs.util.Context;
 import org.killbill.billing.jaxrs.util.JaxrsUriBuilder;
+import org.killbill.billing.payment.api.PaymentApi;
 import org.killbill.billing.util.api.AuditUserApi;
 import org.killbill.billing.util.api.CustomFieldApiException;
 import org.killbill.billing.util.api.CustomFieldUserApi;
@@ -42,16 +42,22 @@ import org.killbill.billing.util.audit.AuditLog;
 import org.killbill.billing.util.callcontext.TenantContext;
 import org.killbill.billing.util.customfield.CustomField;
 import org.killbill.billing.util.entity.Pagination;
+import org.killbill.clock.Clock;
+import org.killbill.commons.metrics.TimedResource;
 
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiResponses;
 
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
 @Singleton
 @Path(JaxrsResource.CUSTOM_FIELDS_PATH)
+@Api(value = JaxrsResource.CUSTOM_FIELDS_PATH, description = "Operations on custom fields")
 public class CustomFieldResource extends JaxRsResourceBase {
 
     @Inject
@@ -60,14 +66,18 @@ public class CustomFieldResource extends JaxRsResourceBase {
                                final CustomFieldUserApi customFieldUserApi,
                                final AuditUserApi auditUserApi,
                                final AccountUserApi accountUserApi,
+                               final PaymentApi paymentApi,
                                final Clock clock,
                                final Context context) {
-        super(uriBuilder, tagUserApi, customFieldUserApi, auditUserApi, accountUserApi, clock, context);
+        super(uriBuilder, tagUserApi, customFieldUserApi, auditUserApi, accountUserApi, paymentApi, null, clock, context);
     }
 
+    @TimedResource
     @GET
     @Path("/" + PAGINATION)
     @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "List custom fields", response = CustomFieldJson.class, responseContainer = "List")
+    @ApiResponses(value = {})
     public Response getCustomFields(@QueryParam(QUERY_SEARCH_OFFSET) @DefaultValue("0") final Long offset,
                                     @QueryParam(QUERY_SEARCH_LIMIT) @DefaultValue("100") final Long limit,
                                     @QueryParam(QUERY_AUDIT) @DefaultValue("NONE") final AuditMode auditMode,
@@ -88,9 +98,12 @@ public class CustomFieldResource extends JaxRsResourceBase {
                                                 nextPageUri);
     }
 
+    @TimedResource
     @GET
     @Path("/" + SEARCH + "/{searchKey:" + ANYTHING_PATTERN + "}")
     @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "Search custom fields", response = CustomFieldJson.class, responseContainer = "List")
+    @ApiResponses(value = {})
     public Response searchCustomFields(@PathParam("searchKey") final String searchKey,
                                        @QueryParam(QUERY_SEARCH_OFFSET) @DefaultValue("0") final Long offset,
                                        @QueryParam(QUERY_SEARCH_LIMIT) @DefaultValue("100") final Long limit,

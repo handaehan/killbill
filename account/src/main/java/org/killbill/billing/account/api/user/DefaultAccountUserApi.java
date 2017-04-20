@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -27,13 +29,18 @@ import org.killbill.billing.account.api.AccountEmail;
 import org.killbill.billing.account.api.AccountUserApi;
 import org.killbill.billing.account.api.DefaultAccount;
 import org.killbill.billing.account.api.DefaultAccountEmail;
+import org.killbill.billing.account.api.ImmutableAccountData;
+import org.killbill.billing.account.api.ImmutableAccountInternalApi;
 import org.killbill.billing.account.dao.AccountDao;
 import org.killbill.billing.account.dao.AccountEmailModelDao;
 import org.killbill.billing.account.dao.AccountModelDao;
+import org.killbill.billing.callcontext.InternalCallContext;
+import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.util.cache.CacheControllerDispatcher;
 import org.killbill.billing.util.callcontext.CallContext;
-import org.killbill.billing.util.callcontext.CallContextFactory;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.callcontext.TenantContext;
+import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.entity.dao.DefaultPaginationHelper.SourcePaginationBuilder;
 
@@ -44,52 +51,66 @@ import com.google.inject.Inject;
 
 import static org.killbill.billing.util.entity.dao.DefaultPaginationHelper.getEntityPaginationNoException;
 
-public class DefaultAccountUserApi implements AccountUserApi {
+public class DefaultAccountUserApi extends DefaultAccountApiBase implements AccountUserApi {
 
-    private final CallContextFactory callContextFactory;
+    private final ImmutableAccountInternalApi immutableAccountInternalApi;
     private final InternalCallContextFactory internalCallContextFactory;
     private final AccountDao accountDao;
 
     @Inject
-    public DefaultAccountUserApi(final CallContextFactory callContextFactory, final InternalCallContextFactory internalCallContextFactory,
-                                 final AccountDao accountDao) {
-        this.callContextFactory = callContextFactory;
+    public DefaultAccountUserApi(final ImmutableAccountInternalApi immutableAccountInternalApi,
+                                 final AccountDao accountDao,
+                                 final NonEntityDao nonEntityDao,
+                                 final CacheControllerDispatcher cacheControllerDispatcher,
+                                 final InternalCallContextFactory internalCallContextFactory) {
+        super(accountDao, nonEntityDao, cacheControllerDispatcher);
+        this.immutableAccountInternalApi = immutableAccountInternalApi;
         this.internalCallContextFactory = internalCallContextFactory;
         this.accountDao = accountDao;
     }
 
-    @Override
-    public Account createAccount(final AccountData data, final CallContext context) throws AccountApiException {
-        // Not transactional, but there is a db constraint on that column
-        if (getIdFromKey(data.getExternalKey(), context) != null) {
-            throw new AccountApiException(ErrorCode.ACCOUNT_ALREADY_EXISTS, data.getExternalKey());
-        }
-
-        final AccountModelDao account = new AccountModelDao(data);
-        accountDao.create(account, internalCallContextFactory.createInternalCallContext(context));
-
-        return new DefaultAccount(account);
-    }
 
     @Override
     public Account getAccountByKey(final String key, final TenantContext context) throws AccountApiException {
-        final AccountModelDao account = accountDao.getAccountByKey(key, internalCallContextFactory.createInternalTenantContext(context));
-        if (account == null) {
-            throw new AccountApiException(ErrorCode.ACCOUNT_DOES_NOT_EXIST_FOR_KEY, key);
-        }
-
-        return new DefaultAccount(account);
+        final InternalTenantContext internalTenantContext = internalCallContextFactory.createInternalTenantContextWithoutAccountRecordId(context);
+        return getAccountByKey(key, internalTenantContext);
     }
 
     @Override
     public Account getAccountById(final UUID id, final TenantContext context) throws AccountApiException {
-        final AccountModelDao account = accountDao.getById(id, internalCallContextFactory.createInternalTenantContext(context));
-        if (account == null) {
-            throw new AccountApiException(ErrorCode.ACCOUNT_DOES_NOT_EXIST_FOR_ID, id);
+        final InternalTenantContext internalTenantContext = internalCallContextFactory.createInternalTenantContext(id, context);
+        return getAccountById(id, internalTenantContext);
+    }
+
+
+    @Override
+    public Account createAccount(final AccountData data, final CallContext context) throws AccountApiException {
+        // Not transactional, but there is a db constraint on that column
+        if (data.getExternalKey() != null && getIdFromKey(data.getExternalKey(), context) != null) {
+            throw new AccountApiException(ErrorCode.ACCOUNT_ALREADY_EXISTS, data.getExternalKey());
         }
+
+        final InternalCallContext internalContext = internalCallContextFactory.createInternalCallContextWithoutAccountRecordId(context);
+
+        if (data.getParentAccountId() != null) {
+            // verify that parent account exists if parentAccountId is not null
+            final ImmutableAccountData immutableAccountData = immutableAccountInternalApi.getImmutableAccountDataById(data.getParentAccountId(), internalContext);
+            if (immutableAccountData == null) {
+                throw new AccountApiException(ErrorCode.ACCOUNT_DOES_NOT_EXIST_FOR_ID, data.getParentAccountId());
+            }
+        }
+
+        final AccountModelDao account = new AccountModelDao(data);
+
+        if (null != account.getExternalKey() && account.getExternalKey().length() > 255) {
+            throw new AccountApiException(ErrorCode.EXTERNAL_KEY_LIMIT_EXCEEDED);
+        }
+
+        accountDao.create(account, internalCallContextFactory.createInternalCallContextWithoutAccountRecordId(context));
 
         return new DefaultAccount(account);
     }
+
 
     @Override
     public Pagination<Account> searchAccounts(final String searchKey, final Long offset, final Long limit, final TenantContext context) {
@@ -97,7 +118,7 @@ public class DefaultAccountUserApi implements AccountUserApi {
                                               new SourcePaginationBuilder<AccountModelDao, AccountApiException>() {
                                                   @Override
                                                   public Pagination<AccountModelDao> build() {
-                                                      return accountDao.searchAccounts(searchKey, offset, limit, internalCallContextFactory.createInternalTenantContext(context));
+                                                      return accountDao.searchAccounts(searchKey, offset, limit, internalCallContextFactory.createInternalTenantContextWithoutAccountRecordId(context));
                                                   }
                                               },
                                               new Function<AccountModelDao, Account>() {
@@ -115,7 +136,7 @@ public class DefaultAccountUserApi implements AccountUserApi {
                                               new SourcePaginationBuilder<AccountModelDao, AccountApiException>() {
                                                   @Override
                                                   public Pagination<AccountModelDao> build() {
-                                                      return accountDao.get(offset, limit, internalCallContextFactory.createInternalTenantContext(context));
+                                                      return accountDao.get(offset, limit, internalCallContextFactory.createInternalTenantContextWithoutAccountRecordId(context));
                                                   }
                                               },
                                               new Function<AccountModelDao, Account>() {
@@ -129,12 +150,25 @@ public class DefaultAccountUserApi implements AccountUserApi {
 
     @Override
     public UUID getIdFromKey(final String externalKey, final TenantContext context) throws AccountApiException {
-        return accountDao.getIdFromKey(externalKey, internalCallContextFactory.createInternalTenantContext(context));
+        return accountDao.getIdFromKey(externalKey, internalCallContextFactory.createInternalTenantContextWithoutAccountRecordId(context));
     }
 
     @Override
     public void updateAccount(final Account account, final CallContext context) throws AccountApiException {
-        updateAccount(account.getId(), account, context);
+
+        // Convert to DefaultAccount to make sure we can safely call validateAccountUpdateInput
+        final DefaultAccount input = new DefaultAccount(account.getId(), account);
+
+        final Account currentAccount = getAccountById(input.getId(), context);
+        if (currentAccount == null) {
+            throw new AccountApiException(ErrorCode.ACCOUNT_DOES_NOT_EXIST_FOR_ID, input.getId());
+        }
+
+        input.validateAccountUpdateInput(currentAccount, true);
+
+        final AccountModelDao updatedAccountModelDao = new AccountModelDao(currentAccount.getId(), input);
+
+        accountDao.update(updatedAccountModelDao, internalCallContextFactory.createInternalCallContext(updatedAccountModelDao.getId(), context));
     }
 
     @Override
@@ -158,16 +192,19 @@ public class DefaultAccountUserApi implements AccountUserApi {
     }
 
     private void updateAccount(final Account currentAccount, final AccountData accountData, final CallContext context) throws AccountApiException {
-        // Set unspecified (null) fields to their current values
         final Account updatedAccount = new DefaultAccount(currentAccount.getId(), accountData);
-        final AccountModelDao accountToUpdate = new AccountModelDao(currentAccount.getId(), updatedAccount.mergeWithDelegate(currentAccount));
 
-        accountDao.update(accountToUpdate, internalCallContextFactory.createInternalCallContext(accountToUpdate.getId(), context));
+        // Set unspecified (null) fields to their current values
+        final Account mergedAccount = updatedAccount.mergeWithDelegate(currentAccount);
+
+        final AccountModelDao updatedAccountModelDao = new AccountModelDao(currentAccount.getId(), mergedAccount);
+
+        accountDao.update(updatedAccountModelDao, internalCallContextFactory.createInternalCallContext(updatedAccountModelDao.getId(), context));
     }
 
     @Override
     public List<AccountEmail> getEmails(final UUID accountId, final TenantContext context) {
-        return ImmutableList.<AccountEmail>copyOf(Collections2.transform(accountDao.getEmailsByAccountId(accountId, internalCallContextFactory.createInternalTenantContext(context)),
+        return ImmutableList.<AccountEmail>copyOf(Collections2.transform(accountDao.getEmailsByAccountId(accountId, internalCallContextFactory.createInternalTenantContextWithoutAccountRecordId(context)),
                                                                          new Function<AccountEmailModelDao, AccountEmail>() {
                                                                              @Override
                                                                              public AccountEmail apply(final AccountEmailModelDao input) {
@@ -184,5 +221,16 @@ public class DefaultAccountUserApi implements AccountUserApi {
     @Override
     public void removeEmail(final UUID accountId, final AccountEmail email, final CallContext context) {
         accountDao.removeEmail(new AccountEmailModelDao(email, false), internalCallContextFactory.createInternalCallContext(accountId, context));
+    }
+
+    @Override
+    public List<Account> getChildrenAccounts(final UUID parentAccountId, final TenantContext context) throws AccountApiException {
+        return ImmutableList.<Account>copyOf(Collections2.transform(accountDao.getAccountsByParentId(parentAccountId, internalCallContextFactory.createInternalTenantContextWithoutAccountRecordId(context)),
+                                                                         new Function<AccountModelDao, Account>() {
+                                                                             @Override
+                                                                             public Account apply(final AccountModelDao input) {
+                                                                                 return new DefaultAccount(input);
+                                                                             }
+                                                                         }));
     }
 }

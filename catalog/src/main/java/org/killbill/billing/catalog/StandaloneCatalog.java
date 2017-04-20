@@ -18,10 +18,12 @@ package org.killbill.billing.catalog;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 
+import javax.annotation.Nullable;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
@@ -31,61 +33,68 @@ import javax.xml.bind.annotation.XmlRootElement;
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.catalog.api.BillingActionPolicy;
 import org.killbill.billing.catalog.api.BillingAlignment;
+import org.killbill.billing.catalog.api.BillingMode;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
-import org.killbill.billing.catalog.api.Limit;
 import org.killbill.billing.catalog.api.Listing;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanAlignmentChange;
 import org.killbill.billing.catalog.api.PlanAlignmentCreate;
 import org.killbill.billing.catalog.api.PlanChangeResult;
 import org.killbill.billing.catalog.api.PlanPhase;
+import org.killbill.billing.catalog.api.PlanPhasePriceOverridesWithCallContext;
 import org.killbill.billing.catalog.api.PlanPhaseSpecifier;
 import org.killbill.billing.catalog.api.PlanSpecifier;
 import org.killbill.billing.catalog.api.PriceList;
+import org.killbill.billing.catalog.api.PriceListSet;
 import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.catalog.api.StaticCatalog;
-import org.killbill.billing.catalog.rules.PlanRules;
-import org.killbill.billing.util.config.catalog.ValidatingConfig;
-import org.killbill.billing.util.config.catalog.ValidationError;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.billing.catalog.rules.DefaultPlanRules;
+import org.killbill.xmlloader.ValidatingConfig;
+import org.killbill.xmlloader.ValidationErrors;
 
 @XmlRootElement(name = "catalog")
 @XmlAccessorType(XmlAccessType.NONE)
 public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> implements StaticCatalog {
+
     @XmlElement(required = true)
     private Date effectiveDate;
 
     @XmlElement(required = true)
     private String catalogName;
 
-    private URI catalogURI;
+    @XmlElement(required = true)
+    private BillingMode recurringBillingMode;
 
     @XmlElementWrapper(name = "currencies", required = true)
-    @XmlElement(name = "currency", required = true)
+    @XmlElement(name = "currency", required = false)
     private Currency[] supportedCurrencies;
 
     @XmlElementWrapper(name = "units", required = false)
-    @XmlElement(name = "unit", required = true)
+    @XmlElement(name = "unit", required = false)
     private DefaultUnit[] units;
 
     @XmlElementWrapper(name = "products", required = true)
-    @XmlElement(name = "product", required = true)
-    private DefaultProduct[] products;
+    @XmlElement(type=DefaultProduct.class, name = "product", required = false)
+    private CatalogEntityCollection<Product> products;
 
     @XmlElement(name = "rules", required = true)
-    private PlanRules planRules;
+    private DefaultPlanRules planRules;
 
     @XmlElementWrapper(name = "plans", required = true)
-    @XmlElement(name = "plan", required = true)
-    private DefaultPlan[] plans;
+    @XmlElement(type=DefaultPlan.class, name = "plan", required = false)
+    private CatalogEntityCollection<Plan> plans;
 
     @XmlElement(name = "priceLists", required = true)
     private DefaultPriceListSet priceLists;
 
+    private URI catalogURI;
+
     public StandaloneCatalog() {
+        this.plans = new CatalogEntityCollection<Plan>();
+        this.products = new CatalogEntityCollection<Product>();
     }
 
     protected StandaloneCatalog(final Date effectiveDate) {
@@ -105,17 +114,27 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         return effectiveDate;
     }
 
+    @Override
+    public BillingMode getRecurringBillingMode() {
+        return recurringBillingMode;
+    }
+
     /* (non-Javadoc)
      * @see org.killbill.billing.catalog.ICatalog#getProducts()
      */
-   @Override
-   public DefaultProduct[] getCurrentProducts() {
-       return products;
-   }
+    @Override
+    public Collection<Product> getCurrentProducts() {
+        return products.getEntries();
+    }
 
-   /* (non-Javadoc)
-    * @see org.killbill.billing.catalog.ICatalog#getProducts()
-    */
+
+    public CatalogEntityCollection<Product>  getCatalogEntityCollectionProduct() {
+        return products;
+    }
+
+    /* (non-Javadoc)
+     * @see org.killbill.billing.catalog.ICatalog#getProducts()
+     */
     @Override
     public DefaultUnit[] getCurrentUnits() {
         return units;
@@ -126,16 +145,29 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         return supportedCurrencies;
     }
 
+
+
     @Override
-    public DefaultPlan[] getCurrentPlans() {
+    public Collection<Plan> getCurrentPlans() {
+        return plans.getEntries();
+    }
+
+
+    public CatalogEntityCollection<Plan> getCatalogEntityCollectionPlan() {
         return plans;
+    }
+
+    public boolean isTemplateCatalog() {
+        return (products == null || products.size() == 0) &&
+               (plans == null || plans.size() == 0) &&
+               (supportedCurrencies == null || supportedCurrencies.length == 0);
     }
 
     public URI getCatalogURI() {
         return catalogURI;
     }
 
-    public PlanRules getPlanRules() {
+    public DefaultPlanRules getPlanRules() {
         return planRules;
     }
 
@@ -151,18 +183,27 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
       * @see org.killbill.billing.catalog.ICatalog#getPlan(java.lang.String, java.lang.String)
       */
     @Override
-    public DefaultPlan findCurrentPlan(final String productName, final BillingPeriod period, final String priceListName) throws CatalogApiException {
-        if (productName == null) {
-            throw new CatalogApiException(ErrorCode.CAT_NULL_PRODUCT_NAME);
+    public Plan createOrFindCurrentPlan(final PlanSpecifier spec, final PlanPhasePriceOverridesWithCallContext unused) throws CatalogApiException {
+        final Plan result;
+        if (spec.getPlanName() != null) {
+            result = findCurrentPlan(spec.getPlanName());
+        } else {
+            if (spec.getProductName() == null) {
+                throw new CatalogApiException(ErrorCode.CAT_NULL_PRODUCT_NAME);
+            }
+            if (spec.getBillingPeriod() == null) {
+                throw new CatalogApiException(ErrorCode.CAT_NULL_BILLING_PERIOD);
+            }
+            final String inputOrDefaultPricelist = (spec.getPriceListName() == null) ? PriceListSet.DEFAULT_PRICELIST_NAME : spec.getPriceListName();
+            final Product product = findCurrentProduct(spec.getProductName());
+            result = priceLists.getPlanFrom(product, spec.getBillingPeriod(), inputOrDefaultPricelist);
         }
-        if (priceLists == null) {
-            throw new CatalogApiException(ErrorCode.CAT_PRICE_LIST_NOT_FOUND, priceListName);
-        }
-        final Product product = findCurrentProduct(productName);
-        final DefaultPlan result = priceLists.getPlanFrom(priceListName, product, period);
         if (result == null) {
-            final String periodString = (period == null) ? "NULL" : period.toString();
-            throw new CatalogApiException(ErrorCode.CAT_PLAN_NOT_FOUND, productName, periodString, priceListName);
+            throw new CatalogApiException(ErrorCode.CAT_PLAN_NOT_FOUND,
+                                          spec.getPlanName() !=  null ? spec.getPlanName() : "undefined",
+                                          spec.getProductName() != null ? spec.getProductName() : "undefined",
+                                          spec.getBillingPeriod() != null ? spec.getBillingPeriod() : "undefined",
+                                          spec.getPriceListName() != null ? spec.getPriceListName() : "undefined");
         }
         return result;
     }
@@ -172,10 +213,9 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         if (name == null || plans == null) {
             throw new CatalogApiException(ErrorCode.CAT_NO_SUCH_PLAN, name);
         }
-        for (final DefaultPlan p : plans) {
-            if (p.getName().equals(name)) {
-                return p;
-            }
+        final DefaultPlan result = (DefaultPlan) plans.findByName(name);
+        if (result != null) {
+            return result;
         }
         throw new CatalogApiException(ErrorCode.CAT_NO_SUCH_PLAN, name);
     }
@@ -185,10 +225,9 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         if (name == null || products == null) {
             throw new CatalogApiException(ErrorCode.CAT_NO_SUCH_PRODUCT, name);
         }
-        for (final DefaultProduct p : products) {
-            if (p.getName().equals(name)) {
-                return p;
-            }
+        final Product result = products.findByName(name);
+        if (result != null) {
+            return result;
         }
         throw new CatalogApiException(ErrorCode.CAT_NO_SUCH_PRODUCT, name);
     }
@@ -198,7 +237,6 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         if (name == null || plans == null) {
             throw new CatalogApiException(ErrorCode.CAT_NO_SUCH_PHASE, name);
         }
-
         final String planName = DefaultPlanPhase.planName(name);
         final Plan plan = findCurrentPlan(planName);
         return plan.findPhase(name);
@@ -210,10 +248,8 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         if (name == null || priceLists == null) {
             throw new CatalogApiException(ErrorCode.CAT_PRICE_LIST_NOT_FOUND, name);
         }
-
         return priceLists.findPriceListFrom(name);
     }
-
 
     //////////////////////////////////////////////////////////////////////////////
     //
@@ -253,35 +289,31 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
 
     @Override
     public ValidationErrors validate(final StandaloneCatalog catalog, final ValidationErrors errors) {
-        validate(catalog, errors, products);
-        validate(catalog, errors, plans);
+        validateCollection(catalog, errors, (DefaultProduct[])  products.toArray(new DefaultProduct[products.size()]));
+        validateCollection(catalog, errors, (DefaultPlan[])  plans.toArray(new DefaultPlan[plans.size()]));
         priceLists.validate(catalog, errors);
         planRules.validate(catalog, errors);
         return errors;
     }
 
-    private Collection<? extends ValidationError> validate(final StandaloneCatalog catalog,
-                                                           final ValidationErrors errors, final ValidatingConfig<StandaloneCatalog>[] configs) {
-        for (final ValidatingConfig<StandaloneCatalog> config : configs) {
-            config.validate(catalog, errors);
-        }
-        return errors;
-    }
-
-
     @Override
     public void initialize(final StandaloneCatalog catalog, final URI sourceURI) {
-        catalogURI = sourceURI;
+
         super.initialize(catalog, sourceURI);
+        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+
+        catalogURI = sourceURI;
         planRules.initialize(catalog, sourceURI);
         priceLists.initialize(catalog, sourceURI);
-        for (final DefaultProduct p : products) {
-            p.initialize(catalog, sourceURI);
+        for (final DefaultUnit cur : units) {
+            cur.initialize(catalog, sourceURI);
         }
-        for (final DefaultPlan p : plans) {
-            p.initialize(catalog, sourceURI);
+        for (final Product p : products.getEntries()) {
+            ((DefaultProduct)p).initialize(catalog, sourceURI);
         }
-
+        for (final Plan p : plans.getEntries()) {
+            ((DefaultPlan) p).initialize(catalog, sourceURI);
+        }
     }
 
 
@@ -290,72 +322,84 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
     // UNIT LIMIT
     //
     //////////////////////////////////////////////////////////////////////////////
-    
+
     @Override
     public boolean compliesWithLimits(final String phaseName, final String unit, final double value) throws CatalogApiException {
         PlanPhase phase = findCurrentPhase(phaseName);
         return phase.compliesWithLimits(unit, value);
     }
 
-    protected StandaloneCatalog setProducts(final DefaultProduct[] products) {
-        this.products = products;
+    public StandaloneCatalog setProducts(final Iterable<Product> products) {
+        this.products = new CatalogEntityCollection<Product>(products);
         return this;
     }
 
-    protected StandaloneCatalog setSupportedCurrencies(final Currency[] supportedCurrencies) {
+    public StandaloneCatalog setSupportedCurrencies(final Currency[] supportedCurrencies) {
         this.supportedCurrencies = supportedCurrencies;
         return this;
     }
 
-    protected StandaloneCatalog setPlanChangeRules(final PlanRules planChangeRules) {
-        this.planRules = planChangeRules;
+    public StandaloneCatalog setPlans(final Iterable<Plan> plans) {
+        this.plans = new CatalogEntityCollection<Plan>(plans);
         return this;
     }
 
-    protected StandaloneCatalog setPlans(final DefaultPlan[] plans) {
-        this.plans = plans;
+    public StandaloneCatalog setCatalogName(final String catalogName) {
+        this.catalogName = catalogName;
         return this;
     }
 
-    protected StandaloneCatalog setEffectiveDate(final Date effectiveDate) {
+    public StandaloneCatalog setEffectiveDate(final Date effectiveDate) {
         this.effectiveDate = effectiveDate;
         return this;
     }
 
-    protected StandaloneCatalog setPlanRules(final PlanRules planRules) {
+    public StandaloneCatalog setRecurringBillingMode(final BillingMode recurringBillingMode) {
+        this.recurringBillingMode = recurringBillingMode;
+        return this;
+    }
+
+    public StandaloneCatalog setPlanRules(final DefaultPlanRules planRules) {
         this.planRules = planRules;
         return this;
     }
 
-    protected StandaloneCatalog setPriceLists(final DefaultPriceListSet priceLists) {
+    public StandaloneCatalog setPriceLists(final DefaultPriceListSet priceLists) {
         this.priceLists = priceLists;
+        return this;
+    }
+
+    public StandaloneCatalog setUnits(final DefaultUnit[] units) {
+        this.units = units;
         return this;
     }
 
     @Override
     public boolean canCreatePlan(final PlanSpecifier specifier) throws CatalogApiException {
         final Product product = findCurrentProduct(specifier.getProductName());
-        final Plan plan = findCurrentPlan(specifier.getProductName(), specifier.getBillingPeriod(), specifier.getPriceListName());
+        final Plan plan = createOrFindCurrentPlan(specifier, null);
         final DefaultPriceList priceList = findCurrentPriceList(specifier.getPriceListName());
 
-        return (!product.isRetired()) &&
-                (!plan.isRetired()) &&
-                (!priceList.isRetired());
+        return (product != null) &&
+               (plan != null) &&
+               (priceList != null);
     }
 
     @Override
-    public List<Listing> getAvailableAddonListings(final String baseProductName) {
+    public List<Listing> getAvailableAddOnListings(final String baseProductName, @Nullable final String priceListName) {
         final List<Listing> availAddons = new ArrayList<Listing>();
 
         try {
             Product product = findCurrentProduct(baseProductName);
-            if ( product != null ) {
-                for ( Product availAddon : product.getAvailable() ) {
-                    for ( BillingPeriod billingPeriod : BillingPeriod.values()) {
-                        for( PriceList priceList : getPriceLists().getAllPriceLists()) {
-                            Plan addonInList = priceList.findPlan(availAddon, billingPeriod);
-                            if ( (addonInList != null) ) {
-                                availAddons.add(new DefaultListing(addonInList, priceList));
+            if (product != null) {
+                for (Product availAddon : product.getAvailable()) {
+                    for (BillingPeriod billingPeriod : BillingPeriod.values()) {
+                        for (PriceList priceList : getPriceLists().getAllPriceLists()) {
+                            if (priceListName == null || priceListName.equals(priceList.getName())) {
+                                Collection<Plan> addonInList = priceList.findPlans(availAddon, billingPeriod);
+                                for (Plan cur : addonInList) {
+                                    availAddons.add(new DefaultListing(cur, priceList));
+                                }
                             }
                         }
                     }
@@ -364,7 +408,6 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
         } catch (CatalogApiException e) {
             // No such product - just return an empty list
         }
-
         return availAddons;
     }
 
@@ -384,7 +427,65 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
                 }
             }
         }
-
         return availBasePlans;
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof StandaloneCatalog)) {
+            return false;
+        }
+
+        final StandaloneCatalog that = (StandaloneCatalog) o;
+
+        if (catalogName != null ? !catalogName.equals(that.catalogName) : that.catalogName != null) {
+            return false;
+        }
+        if (catalogURI != null ? !catalogURI.equals(that.catalogURI) : that.catalogURI != null) {
+            return false;
+        }
+        if (effectiveDate != null ? !effectiveDate.equals(that.effectiveDate) : that.effectiveDate != null) {
+            return false;
+        }
+        if (planRules != null ? !planRules.equals(that.planRules) : that.planRules != null) {
+            return false;
+        }
+        if (!plans.equals(that.plans)) {
+            return false;
+        }
+        if (priceLists != null ? !priceLists.equals(that.priceLists) : that.priceLists != null) {
+            return false;
+        }
+        if (!products.equals(that.products)) {
+            return false;
+        }
+        if (recurringBillingMode != that.recurringBillingMode) {
+            return false;
+        }
+        if (!Arrays.equals(supportedCurrencies, that.supportedCurrencies)) {
+            return false;
+        }
+        if (!Arrays.equals(units, that.units)) {
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = effectiveDate != null ? effectiveDate.hashCode() : 0;
+        result = 31 * result + (catalogName != null ? catalogName.hashCode() : 0);
+        result = 31 * result + (recurringBillingMode != null ? recurringBillingMode.hashCode() : 0);
+        result = 31 * result + (supportedCurrencies != null ? Arrays.hashCode(supportedCurrencies) : 0);
+        result = 31 * result + (units != null ? Arrays.hashCode(units) : 0);
+        result = 31 * result + (products != null ? products.hashCode() : 0);
+        result = 31 * result + (planRules != null ? planRules.hashCode() : 0);
+        result = 31 * result + (plans != null ? plans.hashCode() : 0);
+        result = 31 * result + (priceLists != null ? priceLists.hashCode() : 0);
+        result = 31 * result + (catalogURI != null ? catalogURI.hashCode() : 0);
+        return result;
     }
 }

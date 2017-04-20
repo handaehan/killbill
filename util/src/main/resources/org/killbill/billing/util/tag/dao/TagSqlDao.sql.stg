@@ -29,10 +29,10 @@ tableValues() ::= <<
 historyTableName() ::= "tag_history"
 
 markTagAsDeleted() ::= <<
-update <tableName()> t
-set t.is_active = 0
-where <idField("t.")> = :id
-<AND_CHECK_TENANT("t.")>
+update <tableName()>
+set is_active = false
+where <idField("")> = :id
+<AND_CHECK_TENANT("")>
 ;
 >>
 
@@ -64,41 +64,47 @@ userAndSystemTagDefinitions() ::= <<
   , name
   , description
   from tag_definitions
+  where is_active
   union
   select
     \'00000000-0000-0000-0000-000000000001\' id
-  , \'AUTO_PAY_OFF\' name
+  , \'AUTO_PAY_OFF\' as name
   , \'Suspends payments until removed.\' description
   union
   select
     \'00000000-0000-0000-0000-000000000002\' id
-  , \'AUTO_INVOICING_OFF\' name
+  , \'AUTO_INVOICING_OFF\' as name
   , \'Suspends invoicing until removed.\' description
   union
   select
     \'00000000-0000-0000-0000-000000000003\' id
-  , \'OVERDUE_ENFORCEMENT_OFF\' name
+  , \'OVERDUE_ENFORCEMENT_OFF\' as name
   , \'Suspends overdue enforcement behaviour until removed.\' description
   union
   select
     \'00000000-0000-0000-0000-000000000004\' id
-  , \'WRITTEN_OFF\' name
+  , \'WRITTEN_OFF\' as name
   , \'Indicates that an invoice is written off. No billing or payment effect.\' description
   union
   select
     \'00000000-0000-0000-0000-000000000005\' id
-  , \'MANUAL_PAY\' name
+  , \'MANUAL_PAY\' as name
   , \'Indicates that Killbill doesn\\'\\'t process payments for that account (external payments only)\' description
   union
   select
     \'00000000-0000-0000-0000-000000000006\' id
-  , \'TEST\' name
+  , \'TEST\' as name
   , \'Indicates that this is a test account\' description
   union
   select
     \'00000000-0000-0000-0000-000000000007\' id
-  , \'PARTNER\' name
+  , \'PARTNER\' as name
   , \'Indicates that this is a partner account\' description
+  union
+  select
+    \'00000000-0000-0001-0000-000000000001\' id
+  , \'__PARK__\' as name
+  , \'Accounts with invalid invoicing state\' description
 >>
 
 searchQuery(tagAlias, tagDefinitionAlias) ::= <<
@@ -108,15 +114,16 @@ searchQuery(tagAlias, tagDefinitionAlias) ::= <<
   or <tagDefinitionAlias>description like :likeSearchKey
 >>
 
-search() ::= <<
+search(ordering) ::= <<
 select
 <allTableFields("t.")>
 from <tableName()> t
 join (<userAndSystemTagDefinitions()>) td on td.id = t.tag_definition_id
 where (<searchQuery(tagAlias="t.", tagDefinitionAlias="td.")>)
+<andCheckSoftDeletionWithComma("t.")>
 <AND_CHECK_TENANT("t.")>
-order by <recordIdField("t.")> ASC
-limit :offset, :rowCount
+order by <recordIdField("t.")> <ordering>
+limit :rowCount offset :offset
 ;
 >>
 
@@ -126,6 +133,7 @@ select
 from <tableName()> t
 join (<userAndSystemTagDefinitions()>) td on td.id = t.tag_definition_id
 where (<searchQuery(tagAlias="t.", tagDefinitionAlias="td.")>)
+<andCheckSoftDeletionWithComma("t.")>
 <AND_CHECK_TENANT("t.")>
 ;
 >>

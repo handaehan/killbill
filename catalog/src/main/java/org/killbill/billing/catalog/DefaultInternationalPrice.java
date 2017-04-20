@@ -21,22 +21,23 @@ import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlElement;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.util.Arrays;
 
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.catalog.api.CurrencyValueNull;
 import org.killbill.billing.catalog.api.InternationalPrice;
+import org.killbill.billing.catalog.api.PlanPhasePriceOverride;
 import org.killbill.billing.catalog.api.Price;
-import org.killbill.billing.util.config.catalog.ValidatingConfig;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.xmlloader.ValidatingConfig;
+import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
 public class DefaultInternationalPrice extends ValidatingConfig<StandaloneCatalog> implements InternationalPrice {
 
-    //TODO: Must have a price point for every configured currency
-    //TODO: No prices is a zero cost plan
-    @XmlElement(name = "price")
+    // No prices is a zero cost plan in all currencies
+    @XmlElement(name = "price", required = false)
     private DefaultPrice[] prices;
 
 
@@ -48,12 +49,36 @@ public class DefaultInternationalPrice extends ValidatingConfig<StandaloneCatalo
         return prices;
     }
 
+    public DefaultInternationalPrice() {}
+
+    public DefaultInternationalPrice(final DefaultInternationalPrice in, final PlanPhasePriceOverride override, final boolean fixed) {
+
+        if (in.getPrices().length == 0) {
+            this.prices = new DefaultPrice[1];
+            this.prices[0] = new DefaultPrice(fixed ? override.getFixedPrice() : override.getRecurringPrice(), override.getCurrency());
+        } else {
+            this.prices = new DefaultPrice[in.getPrices().length];
+            // There is a question on whether we keep the other prices that were not overridden or only have one entry for the overridden price on that currency.
+            for (int i = 0; i < in.getPrices().length; i++) {
+                final DefaultPrice curPrice = (DefaultPrice)  in.getPrices()[i];
+                if (curPrice.getCurrency().equals(override.getCurrency())) {
+                    prices[i] = new DefaultPrice(fixed ? override.getFixedPrice() : override.getRecurringPrice(), override.getCurrency());
+                } else {
+                    prices[i] = curPrice;
+                }
+            }
+        }
+    }
 
     /* (non-Javadoc)
       * @see org.killbill.billing.catalog.IInternationalPrice#getPrice(org.killbill.billing.catalog.api.Currency)
       */
     @Override
     public BigDecimal getPrice(final Currency currency) throws CatalogApiException {
+        if (prices.length == 0) {
+            return BigDecimal.ZERO;
+        }
+
         for (final Price p : prices) {
             if (p.getCurrency() == currency) {
                 return p.getValue();
@@ -62,7 +87,7 @@ public class DefaultInternationalPrice extends ValidatingConfig<StandaloneCatalo
         throw new CatalogApiException(ErrorCode.CAT_NO_PRICE_FOR_CURRENCY, currency);
     }
 
-    protected DefaultInternationalPrice setPrices(final DefaultPrice[] prices) {
+    public DefaultInternationalPrice setPrices(final DefaultPrice[] prices) {
         this.prices = prices;
         return this;
     }
@@ -99,23 +124,10 @@ public class DefaultInternationalPrice extends ValidatingConfig<StandaloneCatalo
 
     @Override
     public void initialize(final StandaloneCatalog root, final URI uri) {
-        if (prices == null) {
-            prices = getZeroPrice(root);
-        }
         super.initialize(root, uri);
+        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
     }
 
-    private synchronized DefaultPrice[] getZeroPrice(final StandaloneCatalog root) {
-        final Currency[] currencies = root.getCurrentSupportedCurrencies();
-        final DefaultPrice[] zeroPrice = new DefaultPrice[currencies.length];
-        for (int i = 0; i < currencies.length; i++) {
-            zeroPrice[i] = new DefaultPrice();
-            zeroPrice[i].setCurrency(currencies[i]);
-            zeroPrice[i].setValue(new BigDecimal(0));
-        }
-
-        return zeroPrice;
-    }
 
     @Override
     public boolean isZero() {
@@ -131,4 +143,26 @@ public class DefaultInternationalPrice extends ValidatingConfig<StandaloneCatalo
         return true;
     }
 
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof DefaultInternationalPrice)) {
+            return false;
+        }
+
+        final DefaultInternationalPrice that = (DefaultInternationalPrice) o;
+
+        if (!Arrays.equals(prices, that.prices)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        return prices != null ? Arrays.hashCode(prices) : 0;
+    }
 }

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014 Groupon, Inc
+ * Copyright 2014 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -21,12 +23,13 @@ import org.apache.shiro.guice.ShiroModule;
 import org.apache.shiro.mgt.SecurityManager;
 import org.apache.shiro.session.mgt.DefaultSessionManager;
 import org.apache.shiro.session.mgt.SessionManager;
+import org.killbill.billing.platform.api.KillbillConfigSource;
+import org.killbill.billing.util.config.definition.RbacConfig;
+import org.killbill.billing.util.security.shiro.dao.JDBCSessionDao;
+import org.killbill.billing.util.security.shiro.realm.KillBillJdbcRealm;
+import org.killbill.billing.util.security.shiro.realm.KillBillJndiLdapRealm;
 import org.skife.config.ConfigSource;
 import org.skife.config.ConfigurationObjectFactory;
-
-import org.killbill.billing.util.config.RbacConfig;
-import org.killbill.billing.util.security.shiro.dao.JDBCSessionDao;
-import org.killbill.billing.util.security.shiro.realm.KillBillJndiLdapRealm;
 
 import com.google.inject.binder.AnnotatedBindingBuilder;
 
@@ -37,6 +40,7 @@ public class KillBillShiroModule extends ShiroModule {
     public static final String KILLBILL_LDAP_PROPERTY = "killbill.server.ldap";
     public static final String KILLBILL_RBAC_PROPERTY = "killbill.server.rbac";
 
+
     public static boolean isLDAPEnabled() {
         return Boolean.parseBoolean(System.getProperty(KILLBILL_LDAP_PROPERTY, "false"));
     }
@@ -45,18 +49,33 @@ public class KillBillShiroModule extends ShiroModule {
         return Boolean.parseBoolean(System.getProperty(KILLBILL_RBAC_PROPERTY, "true"));
     }
 
-    private final ConfigSource configSource;
+    private final KillbillConfigSource configSource;
 
-    public KillBillShiroModule(final ConfigSource configSource) {
+    public KillBillShiroModule(final KillbillConfigSource configSource) {
         this.configSource = configSource;
     }
 
     protected void configureShiro() {
-        final RbacConfig config = new ConfigurationObjectFactory(configSource).build(RbacConfig.class);
+        final RbacConfig config = new ConfigurationObjectFactory(new ConfigSource() {
+            @Override
+            public String getString(final String propertyName) {
+                return configSource.getString(propertyName);
+            }
+        }).build(RbacConfig.class);
         bind(RbacConfig.class).toInstance(config);
 
         bindRealm().toProvider(IniRealmProvider.class).asEagerSingleton();
 
+        configureJDBCRealm();
+
+        configureLDAPRealm();
+    }
+
+    protected void configureJDBCRealm() {
+        bindRealm().to(KillBillJdbcRealm.class).asEagerSingleton();
+    }
+
+    protected void configureLDAPRealm() {
         if (isLDAPEnabled()) {
             bindRealm().to(KillBillJndiLdapRealm.class).asEagerSingleton();
         }
@@ -67,7 +86,7 @@ public class KillBillShiroModule extends ShiroModule {
         super.bindSecurityManager(bind);
 
         // Magic provider to configure the cache manager
-        bind(CacheManager.class).toProvider(EhCacheManagerProvider.class).asEagerSingleton();
+        bind(CacheManager.class).toProvider(EhcacheShiroManagerProvider.class).asEagerSingleton();
     }
 
     @Override

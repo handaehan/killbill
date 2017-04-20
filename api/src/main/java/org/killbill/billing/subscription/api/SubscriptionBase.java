@@ -21,10 +21,13 @@ import java.util.UUID;
 
 import org.joda.time.DateTime;
 
+import org.joda.time.DateTimeZone;
 import org.killbill.billing.catalog.api.BillingActionPolicy;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
+import org.killbill.billing.catalog.api.PlanPhasePriceOverride;
+import org.killbill.billing.catalog.api.PlanSpecifier;
 import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.catalog.api.ProductCategory;
@@ -44,22 +47,22 @@ public interface SubscriptionBase extends Entity, Blockable {
     public boolean cancelWithDate(final DateTime requestedDate, final CallContext context)
             throws SubscriptionBaseApiException;
 
-    public boolean cancelWithPolicy(final BillingActionPolicy policy, final CallContext context)
+    public boolean cancelWithPolicy(final BillingActionPolicy policy, final DateTimeZone accountTimeZone, int accountBillCycleDayLocal, final CallContext context)
             throws SubscriptionBaseApiException;
 
     public boolean uncancel(final CallContext context)
             throws SubscriptionBaseApiException;
 
     // Return the effective date of the change
-    public DateTime changePlan(final String productName, final BillingPeriod term, final String priceList, final CallContext context)
+    public DateTime changePlan(final PlanSpecifier spec, final List<PlanPhasePriceOverride> overrides, final CallContext context)
             throws SubscriptionBaseApiException;
 
     // Return the effective date of the change
-    public DateTime changePlanWithDate(final String productName, final BillingPeriod term, final String priceList, final DateTime requestedDate, final CallContext context)
+    public DateTime changePlanWithDate(final PlanSpecifier spec, final List<PlanPhasePriceOverride> overrides, final DateTime requestedDate, final CallContext context)
             throws SubscriptionBaseApiException;
 
     // Return the effective date of the change
-    public DateTime changePlanWithPolicy(final String productName, final BillingPeriod term, final String priceList,
+    public DateTime changePlanWithPolicy(final PlanSpecifier spec, final List<PlanPhasePriceOverride> overrides,
                                          final BillingActionPolicy policy, final CallContext context)
             throws SubscriptionBaseApiException;
 
@@ -95,11 +98,17 @@ public interface SubscriptionBase extends Entity, Blockable {
 
     public DateTime getChargedThroughDate();
 
+    public boolean isMigrated();
+
     public ProductCategory getCategory();
+
+    public Integer getBillCycleDayLocal();
 
     public SubscriptionBaseTransition getPendingTransition();
 
     public SubscriptionBaseTransition getPreviousTransition();
 
     public List<SubscriptionBaseTransition> getAllTransitions();
+
+    public DateTime getDateOfFirstRecurringNonZeroCharge();
 }

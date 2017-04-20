@@ -9,7 +9,8 @@ historyTableName() ::= "payment_method_history"
 andCheckSoftDeletionWithComma(prefix) ::= "and <prefix>is_active"
 
 tableFields(prefix) ::= <<
-  <prefix>account_id
+  <prefix>external_key
+, <prefix>account_id
 , <prefix>plugin_name
 , <prefix>is_active
 , <prefix>created_by
@@ -19,7 +20,8 @@ tableFields(prefix) ::= <<
 >>
 
 tableValues() ::= <<
-  :accountId
+  :externalKey
+, :accountId
 , :pluginName
 , :isActive
 , :createdBy
@@ -28,12 +30,11 @@ tableValues() ::= <<
 , :updatedDate
 >>
 
-
 markPaymentMethodAsDeleted(id) ::= <<
 update <tableName()>
-set is_active = 0
+set is_active = false
 , updated_by = :updatedBy
-, updated_date = :createdDate
+, updated_date = :updatedDate
 where  id = :id
 <AND_CHECK_TENANT()>
 ;
@@ -41,10 +42,27 @@ where  id = :id
 
 unmarkPaymentMethodAsDeleted(id) ::= <<
 update <tableName()>
-set is_active = 1
+set is_active = true
 , updated_by = :updatedBy
-, updated_date = :createdDate
+, updated_date = :updatedDate
 where  id = :id
+<AND_CHECK_TENANT()>
+;
+>>
+
+getByExternalKey() ::= <<
+select <allTableFields()>
+from <tableName()>
+where external_key = :externalKey
+<andCheckSoftDeletionWithComma()>
+<AND_CHECK_TENANT()>
+;
+>>
+
+getPaymentMethodByExternalKeyIncludedDeleted() ::= <<
+select <allTableFields()>
+from <tableName()>
+where external_key = :externalKey
 <AND_CHECK_TENANT()>
 ;
 >>
@@ -53,34 +71,45 @@ getPaymentMethodIncludedDelete(accountId) ::= <<
 select <allTableFields()>
 from <tableName()>
 where id = :id
+<AND_CHECK_TENANT()>
 ;
 >>
 
-getByAccountId(accountId) ::= <<
+getForAccount() ::= <<
 select
 <allTableFields()>
 from <tableName()>
-where account_id = :accountId
-and is_active = 1
+where <accountRecordIdField()> = :accountRecordId
+<andCheckSoftDeletionWithComma()>
+<AND_CHECK_TENANT()>
 ;
 >>
 
-getByAccountIdIncludedDelete(accountId) ::= <<
+getForAccountIncludedDelete() ::= <<
 select
 <allTableFields()>
 from <tableName()>
-where account_id = :accountId
+where <accountRecordIdField()> = :accountRecordId
+<AND_CHECK_TENANT()>
 ;
 >>
 
-getByPluginName() ::= <<
+searchQuery(prefix) ::= <<
+     <idField(prefix)> = :searchKey
+  or <prefix>external_key like :likeSearchKey
+  or <prefix>account_id = :searchKey
+  or <prefix>plugin_name like :likeSearchKey
+>>
+
+getByPluginName(ordering) ::= <<
 select
 <allTableFields("t.")>
 from <tableName()> t
 where t.plugin_name = :pluginName
-and t.is_active = 1
-order by t.record_id
-limit :offset, :rowCount
+<andCheckSoftDeletionWithComma("t.")>
+<AND_CHECK_TENANT("t.")>
+order by t.record_id <ordering>
+limit :rowCount offset :offset
 ;
 >>
 
@@ -89,6 +118,7 @@ select
   count(1) as count
 from <tableName()> t
 where t.plugin_name = :pluginName
-and t.is_active = 1
+<andCheckSoftDeletionWithComma("t.")>
+<AND_CHECK_TENANT("t.")>
 ;
 >>

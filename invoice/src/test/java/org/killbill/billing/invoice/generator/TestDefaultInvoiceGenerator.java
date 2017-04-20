@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -20,6 +22,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,40 +30,51 @@ import java.util.UUID;
 import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-import org.mockito.Mockito;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.testng.annotations.Test;
-
+import org.killbill.billing.account.api.Account;
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.DefaultPrice;
 import org.killbill.billing.catalog.MockInternationalPrice;
 import org.killbill.billing.catalog.MockPlan;
 import org.killbill.billing.catalog.MockPlanPhase;
+import org.killbill.billing.catalog.api.BillingMode;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.catalog.api.PhaseType;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
-import org.killbill.clock.Clock;
-import org.killbill.clock.DefaultClock;
+import org.killbill.billing.entity.EntityPersistenceException;
 import org.killbill.billing.invoice.InvoiceTestSuiteNoDB;
 import org.killbill.billing.invoice.MockBillingEventSet;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
 import org.killbill.billing.invoice.api.InvoiceItem;
+import org.killbill.billing.invoice.api.InvoiceItemType;
 import org.killbill.billing.invoice.api.InvoicePaymentType;
+import org.killbill.billing.invoice.api.InvoiceStatus;
+import org.killbill.billing.invoice.model.DefaultInvoice;
 import org.killbill.billing.invoice.model.DefaultInvoicePayment;
 import org.killbill.billing.invoice.model.FixedPriceInvoiceItem;
+import org.killbill.billing.invoice.model.ItemAdjInvoiceItem;
 import org.killbill.billing.invoice.model.RecurringInvoiceItem;
+import org.killbill.billing.invoice.model.RepairAdjInvoiceItem;
 import org.killbill.billing.junction.BillingEvent;
 import org.killbill.billing.junction.BillingEventSet;
-import org.killbill.billing.junction.BillingModeType;
+import org.killbill.billing.mock.MockAccountBuilder;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
-import org.killbill.billing.util.config.InvoiceConfig;
+import org.killbill.billing.util.config.definition.InvoiceConfig;
 import org.killbill.billing.util.currency.KillBillMoney;
+import org.killbill.clock.Clock;
+import org.killbill.clock.DefaultClock;
+import org.mockito.Mockito;
+import org.skife.config.TimeSpan;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.Test;
 
 import static org.killbill.billing.invoice.TestInvoiceHelper.EIGHT;
 import static org.killbill.billing.invoice.TestInvoiceHelper.FIFTEEN;
@@ -85,39 +99,43 @@ import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 
+@SuppressWarnings("UnusedDeclaration")
 public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
+
+    private Account account;
 
     private static final Logger log = LoggerFactory.getLogger(TestDefaultInvoiceGenerator.class);
 
-    public TestDefaultInvoiceGenerator() {
+    @BeforeClass(groups = "fast")
+    protected void beforeClass() throws Exception {
+        super.beforeClass();
         final Clock clock = new DefaultClock();
-        final InvoiceConfig invoiceConfig = new InvoiceConfig() {
-            @Override
-            public int getNumberOfMonthsInFuture() {
-                return 36;
-            }
+        this.account = new MockAccountBuilder().name(UUID.randomUUID().toString().substring(1, 8))
+                                               .firstNameLength(6)
+                                               .email(UUID.randomUUID().toString().substring(1, 8))
+                                               .phone(UUID.randomUUID().toString().substring(1, 8))
+                                               .migrated(false)
+                                               .isNotifiedForInvoices(true)
+                                               .externalKey(UUID.randomUUID().toString().substring(1, 8))
+                                               .billingCycleDayLocal(31)
+                                               .currency(Currency.USD)
+                                               .paymentMethodId(UUID.randomUUID())
+                                               .timeZone(DateTimeZone.UTC)
+                                               .build();
 
-            @Override
-            public boolean isEmailNotificationsEnabled() {
-                return false;
-            }
-        };
-        this.generator = new DefaultInvoiceGenerator(clock, invoiceConfig);
     }
 
     @Test(groups = "fast")
     public void testWithNullEventSetAndNullInvoiceSet() throws InvoiceApiException {
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, null, null, clock.getUTCToday(), Currency.USD);
-        assertNull(invoice);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, null, null, clock.getUTCToday(), Currency.USD, internalCallContext);
+        assertNull(invoiceWithMetadata.getInvoice());
     }
 
     @Test(groups = "fast")
     public void testWithEmptyEventSet() throws InvoiceApiException {
         final BillingEventSet events = new MockBillingEventSet();
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, clock.getUTCToday(), Currency.USD);
-        assertNull(invoice);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, clock.getUTCToday(), Currency.USD, internalCallContext);
+        assertNull(invoiceWithMetadata.getInvoice());
     }
 
     @Test(groups = "fast")
@@ -135,30 +153,55 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event);
 
         final LocalDate targetDate = invoiceUtil.buildDate(2011, 10, 3);
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 2);
         assertEquals(invoice.getBalance(), KillBillMoney.of(TWENTY, invoice.getCurrency()));
         assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), sub.getId());
+
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 9, 1));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 10, 1));
+
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2011, 10, 1));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2011, 11, 1));
     }
 
-    private SubscriptionBase createSubscription() {
-        return createSubscription(UUID.randomUUID(), UUID.randomUUID());
-    }
+    @Test(groups = "fast")
+    public void testWithSingleThirtyDaysEvent() throws InvoiceApiException, CatalogApiException {
+        final BillingEventSet events = new MockBillingEventSet();
 
-    private SubscriptionBase createSubscription(final UUID subscriptionId, final UUID bundleId) {
-        final SubscriptionBase sub = Mockito.mock(SubscriptionBase.class);
-        Mockito.when(sub.getId()).thenReturn(subscriptionId);
-        Mockito.when(sub.getBundleId()).thenReturn(bundleId);
+        final SubscriptionBase sub = createSubscription();
+        final LocalDate startDate = invoiceUtil.buildDate(2011, 9, 1);
 
-        return sub;
+        final Plan plan = new MockPlan();
+        final BigDecimal rate1 = TEN;
+        final PlanPhase phase = createMockThirtyDaysPlanPhase(rate1);
+
+        final BillingEvent event = createBillingEvent(sub.getId(), sub.getBundleId(), startDate, plan, phase, 1);
+        events.add(event);
+
+        final LocalDate targetDate = invoiceUtil.buildDate(2011, 10, 3);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
+        assertNotNull(invoice);
+        assertEquals(invoice.getNumberOfItems(), 2);
+        assertEquals(invoice.getBalance(), KillBillMoney.of(TWENTY, invoice.getCurrency()));
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), sub.getId());
+
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 9, 1));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 10, 1));
+
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2011, 10, 1));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2011, 10, 31));
     }
 
     @Test(groups = "fast")
     public void testSimpleWithTimeZone() throws InvoiceApiException, CatalogApiException {
-        final UUID accountId = UUID.randomUUID();
         final SubscriptionBase sub = createSubscription();
         final Plan plan = new MockPlan();
         final BigDecimal rate = TEN;
@@ -174,8 +217,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         // Target date is the next BCD, in local time
         final LocalDate targetDate = invoiceUtil.buildDate(2012, 8, bcdLocal);
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 2);
         assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), invoiceUtil.buildDate(2012, 7, 16));
@@ -198,8 +241,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         // Set a target date of today (start date)
         final LocalDate targetDate = startDate;
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 1);
         assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), invoiceUtil.buildDate(2012, 7, 16));
@@ -220,9 +263,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event);
 
         final LocalDate targetDate = invoiceUtil.buildDate(2011, 10, 3);
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 2);
 
@@ -253,9 +295,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event2);
 
         final LocalDate targetDate = invoiceUtil.buildDate(2011, 10, 3);
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 2);
         assertEquals(invoice.getBalance(), KillBillMoney.of(rate1.add(rate2), invoice.getCurrency()));
@@ -280,8 +321,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         final LocalDate targetDate = invoiceUtil.buildDate(2011, 12, 3);
         final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 4);
 
@@ -321,9 +362,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event3);
 
         final LocalDate targetDate = invoiceUtil.buildDate(2011, 12, 3);
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), 4);
         assertEquals(invoice.getBalance(), KillBillMoney.of(rate1.add(rate2).add(TWO.multiply(rate3)), invoice.getCurrency()));
@@ -344,14 +384,14 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event1);
 
         LocalDate targetDate = invoiceUtil.buildDate(2011, 12, 1);
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
         final List<Invoice> existingInvoices = new ArrayList<Invoice>();
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
         existingInvoices.add(invoice1);
 
         targetDate = invoiceUtil.buildDate(2011, 12, 3);
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, existingInvoices, targetDate, Currency.USD);
-
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, existingInvoices, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
         assertNull(invoice2);
     }
 
@@ -441,7 +481,7 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         // on 4/29/2011, cancel SubscriptionBase 1
         events.add(createBillingEvent(subscriptionId1, bundleId, plan1CancelDate, plan1, plan1Phase3, 5));
 
-        expectedAmount = ZERO;
+        expectedAmount = new BigDecimal("-2.40");
         testInvoiceGeneration(accountId, events, invoices, plan1CancelDate, 1, expectedAmount);
 
         // on 5/10/2011, invoice SubscriptionBase 2 (trial)
@@ -486,7 +526,7 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         // on 7/31/2011, convert SubscriptionBase 3 to annual
         events.add(createBillingEvent(subscriptionId3, bundleId, plan3UpgradeToAnnualDate, plan3, plan3Phase2, 31));
-        testInvoiceGeneration(accountId, events, invoices, plan3UpgradeToAnnualDate, 2, ONE_HUNDRED);
+        testInvoiceGeneration(accountId, events, invoices, plan3UpgradeToAnnualDate, 2, new BigDecimal("93.55"));
 
         // on 8/7/2011, invoice SubscriptionBase 4 (plan 2)
         events.add(createBillingEvent(subscriptionId4, bundleId, plan4ChangeOfPlanDate, plan4b, plan4bPhase1, 7));
@@ -508,7 +548,7 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         // on 10/7/2011, invoice SubscriptionBase 4 (plan 2), cancel SubscriptionBase 5
         events.add(createBillingEvent(subscriptionId5, bundleId, plan5CancelDate, plan5, plan5Phase2, 10));
-        testInvoiceGeneration(accountId, events, invoices, plan5CancelDate, 2, TWENTY_FOUR);
+        testInvoiceGeneration(accountId, events, invoices, plan5CancelDate, 2, new BigDecimal("22.00"));
 
         // on 10/10/2011, invoice plan 2 (evergreen)
         expectedAmount = FORTY;
@@ -523,23 +563,27 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final LocalDate targetDate = invoiceUtil.buildDate(2011, 1, 1);
         events.add(createBillingEvent(UUID.randomUUID(), UUID.randomUUID(), targetDate, plan, planPhase, 1));
 
-        final Invoice invoice = generator.generateInvoice(UUID.randomUUID(), events, null, targetDate, Currency.USD);
-
-        assertEquals(invoice.getNumberOfItems(), 1);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
+        assertNotNull(invoice);
+        assertEquals(invoice.getInvoiceItems().size(), 1);
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(BigDecimal.ZERO), 0);
     }
 
     @Test(groups = "fast")
     public void testEndDateIsCorrect() throws InvoiceApiException, CatalogApiException {
         final Plan plan = new MockPlan();
-        final PlanPhase planPhase = createMockMonthlyPlanPhase(ZERO);
+        final PlanPhase planPhase = createMockMonthlyPlanPhase(ONE);
         final BillingEventSet events = new MockBillingEventSet();
         final LocalDate startDate = clock.getUTCToday().minusDays(1);
         final LocalDate targetDate = startDate.plusDays(1);
 
         events.add(createBillingEvent(UUID.randomUUID(), UUID.randomUUID(), startDate, plan, planPhase, startDate.getDayOfMonth()));
 
-        final Invoice invoice = generator.generateInvoice(UUID.randomUUID(), events, null, targetDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         final RecurringInvoiceItem item = (RecurringInvoiceItem) invoice.getInvoiceItems().get(0);
+
 
         // end date of the invoice item should be equal to exactly one month later (rounded)
         assertEquals(item.getEndDate(), startDate.plusMonths(1));
@@ -547,7 +591,6 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
     @Test(groups = "fast")
     public void testFixedPriceLifeCycle() throws InvoiceApiException {
-        final UUID accountId = UUID.randomUUID();
         final SubscriptionBase subscription = createSubscription();
 
         final Plan plan = new MockPlan("plan 1");
@@ -564,24 +607,26 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final BillingEvent event1 = invoiceUtil.createMockBillingEvent(null, subscription, new DateTime("2012-01-1"),
                                                                        plan, phase1,
                                                                        ZERO, null, Currency.USD, BillingPeriod.NO_BILLING_PERIOD, 1,
-                                                                       BillingModeType.IN_ADVANCE, "Test Event 1", 1L,
+                                                                       BillingMode.IN_ADVANCE, "Test Event 1", 1L,
                                                                        SubscriptionBaseTransitionType.CREATE);
 
         final BillingEvent event2 = invoiceUtil.createMockBillingEvent(null, subscription, changeDate,
                                                                        plan, phase2,
                                                                        ZERO, null, Currency.USD, BillingPeriod.NO_BILLING_PERIOD, 1,
-                                                                       BillingModeType.IN_ADVANCE, "Test Event 2", 2L,
+                                                                       BillingMode.IN_ADVANCE, "Test Event 2", 2L,
                                                                        SubscriptionBaseTransitionType.PHASE);
 
         events.add(event2);
         events.add(event1);
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, new LocalDate("2012-02-01"), Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, new LocalDate("2012-02-01"), Currency.USD, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
         assertNotNull(invoice1);
         assertEquals(invoice1.getNumberOfItems(), 1);
 
         final List<Invoice> invoiceList = new ArrayList<Invoice>();
         invoiceList.add(invoice1);
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, invoiceList, new LocalDate("2012-04-05"), Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, invoiceList, new LocalDate("2012-04-05"), Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
         assertNotNull(invoice2);
         assertEquals(invoice2.getNumberOfItems(), 1);
         final FixedPriceInvoiceItem item = (FixedPriceInvoiceItem) invoice2.getInvoiceItems().get(0);
@@ -599,14 +644,14 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final BillingEventSet events = new MockBillingEventSet();
         final UUID subscriptionId = UUID.randomUUID();
         final UUID bundleId = UUID.randomUUID();
-        final UUID accountId = UUID.randomUUID();
 
         final LocalDate startDate = new LocalDate(2011, 1, 1);
         final BillingEvent event1 = createBillingEvent(subscriptionId, bundleId, startDate, plan1, phase1, 1);
         events.add(event1);
 
         // ensure both components are invoiced
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, startDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, startDate, Currency.USD, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
         assertNotNull(invoice1);
         assertEquals(invoice1.getNumberOfItems(), 2);
         assertEquals(invoice1.getBalance(), KillBillMoney.of(FIFTEEN, invoice1.getCurrency()));
@@ -618,7 +663,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final LocalDate currentDate = startDate.plusMonths(1);
 
         // ensure that only the recurring price is invoiced
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, invoiceList, currentDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, invoiceList, currentDate, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
         assertNotNull(invoice2);
         assertEquals(invoice2.getNumberOfItems(), 1);
         assertEquals(invoice2.getBalance(), KillBillMoney.of(FIVE, invoice2.getCurrency()));
@@ -643,8 +689,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event1);
 
         // ensure that a single invoice item is generated for the fixed cost
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, startDate, Currency.USD);
-        assertNotNull(invoice1);
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, startDate, Currency.USD, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();assertNotNull(invoice1);
         assertEquals(invoice1.getNumberOfItems(), 1);
         assertEquals(invoice1.getBalance(), KillBillMoney.of(fixedCost1, invoice1.getCurrency()));
 
@@ -657,8 +703,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         events.add(event2);
 
         // ensure that a single invoice item is generated for the fixed cost
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, invoiceList, phaseChangeDate, Currency.USD);
-        assertNotNull(invoice2);
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, invoiceList, phaseChangeDate, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
         assertEquals(invoice2.getNumberOfItems(), 1);
         assertEquals(invoice2.getBalance(), KillBillMoney.of(fixedCost2, invoice2.getCurrency()));
     }
@@ -667,7 +713,6 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
     public void testInvoiceGenerationFailureScenario() throws InvoiceApiException, CatalogApiException {
         final BillingEventSet events = new MockBillingEventSet();
         final UUID subscriptionId = UUID.randomUUID();
-        final UUID accountId = UUID.randomUUID();
         final UUID bundleId = UUID.randomUUID();
         final int BILL_CYCLE_DAY = 15;
 
@@ -690,7 +735,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final LocalDate discountPhaseEndDate = trialPhaseEndDate.plusMonths(6);
         events.add(createBillingEvent(subscriptionId, bundleId, discountPhaseEndDate, plan1, phase3, BILL_CYCLE_DAY));
 
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, creationDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, creationDate, Currency.USD, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
         assertNotNull(invoice1);
         assertEquals(invoice1.getNumberOfItems(), 1);
         assertEquals(invoice1.getBalance().compareTo(ZERO), 0);
@@ -698,7 +744,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final List<Invoice> invoiceList = new ArrayList<Invoice>();
         invoiceList.add(invoice1);
 
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, invoiceList, trialPhaseEndDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, invoiceList, trialPhaseEndDate, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
         assertNotNull(invoice2);
         assertEquals(invoice2.getNumberOfItems(), 1);
         assertEquals(invoice2.getInvoiceItems().get(0).getStartDate(), trialPhaseEndDate);
@@ -706,7 +753,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         invoiceList.add(invoice2);
         LocalDate targetDate = new LocalDate(trialPhaseEndDate.getYear(), trialPhaseEndDate.getMonthOfYear(), BILL_CYCLE_DAY);
-        final Invoice invoice3 = generator.generateInvoice(accountId, events, invoiceList, targetDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata3 = generator.generateInvoice(account, events, invoiceList, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice3 = invoiceWithMetadata3.getInvoice();
         assertNotNull(invoice3);
         assertEquals(invoice3.getNumberOfItems(), 1);
         assertEquals(invoice3.getInvoiceItems().get(0).getStartDate(), targetDate);
@@ -714,7 +762,8 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
 
         invoiceList.add(invoice3);
         targetDate = targetDate.plusMonths(6);
-        final Invoice invoice4 = generator.generateInvoice(accountId, events, invoiceList, targetDate, Currency.USD);
+        final InvoiceWithMetadata invoiceWithMetadata4 = generator.generateInvoice(account, events, invoiceList, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice4 = invoiceWithMetadata4.getInvoice();
         assertNotNull(invoice4);
         assertEquals(invoice4.getNumberOfItems(), 7);
     }
@@ -726,7 +775,538 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         final Plan plan1 = new MockPlan();
         final PlanPhase phase1 = createMockMonthlyPlanPhase(null, ZERO, PhaseType.TRIAL);
         events.add(createBillingEvent(UUID.randomUUID(), UUID.randomUUID(), clock.getUTCToday(), plan1, phase1, 1));
-        generator.generateInvoice(UUID.randomUUID(), events, null, targetDate, Currency.USD);
+        generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+    }
+
+    @Test(groups = "fast")
+    public void testWithFullRepairInvoiceGeneration() throws CatalogApiException, InvoiceApiException {
+        final LocalDate april25 = new LocalDate(2012, 4, 25);
+
+        // create a base plan on April 25th
+        final SubscriptionBase baseSubscription = createSubscription();
+
+        final Plan basePlan = new MockPlan("base Plan");
+        final MockInternationalPrice price5 = new MockInternationalPrice(new DefaultPrice(FIVE, Currency.USD));
+        final MockInternationalPrice price10 = new MockInternationalPrice(new DefaultPrice(TEN, Currency.USD));
+        final MockInternationalPrice price20 = new MockInternationalPrice(new DefaultPrice(TWENTY, Currency.USD));
+        final PlanPhase basePlanEvergreen = new MockPlanPhase(price10, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
+
+        final BillingEventSet events = new MockBillingEventSet();
+        events.add(createBillingEvent(baseSubscription.getId(), baseSubscription.getBundleId(), april25, basePlan, basePlanEvergreen, 25));
+
+        // generate invoice
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, april25, Currency.USD, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
+        assertNotNull(invoice1);
+        assertEquals(invoice1.getNumberOfItems(), 1);
+        assertEquals(invoice1.getBalance().compareTo(TEN), 0);
+
+        final List<Invoice> invoices = new ArrayList<Invoice>();
+        invoices.add(invoice1);
+
+        // create 2 add ons on April 28th
+        final LocalDate april28 = new LocalDate(2012, 4, 28);
+        final SubscriptionBase addOnSubscription1 = createSubscription();
+        final Plan addOn1Plan = new MockPlan("add on 1");
+        final PlanPhase addOn1PlanPhaseEvergreen = new MockPlanPhase(price5, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
+        events.add(createBillingEvent(addOnSubscription1.getId(), baseSubscription.getBundleId(), april28, addOn1Plan, addOn1PlanPhaseEvergreen, 25));
+
+        final SubscriptionBase addOnSubscription2 = createSubscription();
+        final Plan addOn2Plan = new MockPlan("add on 2");
+        final PlanPhase addOn2PlanPhaseEvergreen = new MockPlanPhase(price20, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
+        events.add(createBillingEvent(addOnSubscription2.getId(), baseSubscription.getBundleId(), april28, addOn2Plan, addOn2PlanPhaseEvergreen, 25));
+
+        // generate invoice
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, invoices, april28, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
+
+        invoices.add(invoice2);
+        assertNotNull(invoice2);
+        assertEquals(invoice2.getNumberOfItems(), 2);
+        assertEquals(invoice2.getBalance().compareTo(KillBillMoney.of(TWENTY_FIVE.multiply(new BigDecimal("0.9")), invoice2.getCurrency())), 0);
+
+        // perform a repair (change base plan; remove one add-on)
+        // event stream should include just two plans
+        final MockBillingEventSet newEvents = new MockBillingEventSet();
+        final Plan basePlan2 = new MockPlan("base plan 2");
+        final MockInternationalPrice price13 = new MockInternationalPrice(new DefaultPrice(THIRTEEN, Currency.USD));
+        final PlanPhase basePlan2Phase = new MockPlanPhase(price13, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
+        newEvents.add(createBillingEvent(baseSubscription.getId(), baseSubscription.getBundleId(), april25, basePlan2, basePlan2Phase, 25));
+        newEvents.add(createBillingEvent(addOnSubscription1.getId(), baseSubscription.getBundleId(), april28, addOn1Plan, addOn1PlanPhaseEvergreen, 25));
+
+        // generate invoice
+        final LocalDate may1 = new LocalDate(2012, 5, 1);
+        final InvoiceWithMetadata invoiceWithMetadata3 = generator.generateInvoice(account, newEvents, invoices, may1, Currency.USD, internalCallContext);
+        final Invoice invoice3 = invoiceWithMetadata3.getInvoice();
+        assertNotNull(invoice3);
+        assertEquals(invoice3.getNumberOfItems(), 3);
+        // -4.50 -18 - 10 (to correct the previous 2 invoices) + 4.50 + 13
+        assertEquals(invoice3.getBalance().compareTo(FIFTEEN.negate()), 0);
+    }
+
+    @Test(groups = "fast")
+    public void testRepairForPaidInvoice() throws CatalogApiException, InvoiceApiException {
+        // create an invoice
+        final LocalDate april25 = new LocalDate(2012, 4, 25);
+
+        // create a base plan on April 25th
+        final SubscriptionBase originalSubscription = createSubscription();
+
+        final Plan originalPlan = new MockPlan("original plan");
+        final MockInternationalPrice price10 = new MockInternationalPrice(new DefaultPrice(TEN, Currency.USD));
+        final PlanPhase originalPlanEvergreen = new MockPlanPhase(price10, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
+
+        final BillingEventSet events = new MockBillingEventSet();
+        events.add(createBillingEvent(originalSubscription.getId(), originalSubscription.getBundleId(), april25, originalPlan, originalPlanEvergreen, 25));
+
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, events, null, april25, Currency.USD, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
+
+        printDetailInvoice(invoice1);
+
+        assertEquals(invoice1.getNumberOfItems(), 1);
+        final List<Invoice> invoices = new ArrayList<Invoice>();
+        invoices.add(invoice1);
+
+        // pay the invoice
+        invoice1.addPayment(new DefaultInvoicePayment(InvoicePaymentType.ATTEMPT, UUID.randomUUID(), invoice1.getId(), april25.toDateTimeAtCurrentTime(), TEN,
+                                                      Currency.USD, Currency.USD, null, true));
+        assertEquals(invoice1.getBalance().compareTo(ZERO), 0);
+
+        // change the plan (i.e. repair) on start date
+        events.clear();
+        final SubscriptionBase newSubscription = createSubscription();
+        final Plan newPlan = new MockPlan("new plan");
+        final MockInternationalPrice price5 = new MockInternationalPrice(new DefaultPrice(FIVE, Currency.USD));
+        final PlanPhase newPlanEvergreen = new MockPlanPhase(price5, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
+        events.add(createBillingEvent(newSubscription.getId(), originalSubscription.getBundleId(), april25, newPlan, newPlanEvergreen, 25));
+
+        // generate a new invoice
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, invoices, april25, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
+
+        printDetailInvoice(invoice2);
+        assertEquals(invoice2.getNumberOfItems(), 2);
+        invoices.add(invoice2);
+
+        // move items to the correct invoice (normally, the dao calls will sort that out)
+        distributeItems(invoices);
+
+        // ensure that the original invoice balance is zero
+        assertEquals(invoice1.getBalance().compareTo(BigDecimal.ZERO), 0);
+
+        // ensure that the account balance is correct
+        assertEquals(invoice2.getBalance().compareTo(new BigDecimal("-5.0")), 0);
+    }
+
+    // Regression test for #170 (see https://github.com/killbill/killbill/pull/173)
+    @Test(groups = "fast")
+    public void testRegressionFor170() throws EntityPersistenceException, InvoiceApiException, CatalogApiException {
+        final UUID accountId = account.getId();
+        final Currency currency = Currency.USD;
+        final SubscriptionBase subscription = createSubscription();
+        final MockInternationalPrice recurringPrice = new MockInternationalPrice(new DefaultPrice(new BigDecimal("2.9500"), Currency.USD));
+        final MockPlanPhase phase = new MockPlanPhase(recurringPrice, null);
+        final Plan plan = new MockPlan(phase);
+
+        final LocalDate targetDate = new LocalDate(2013, 10, 30);
+
+        final Invoice existingInvoice = new DefaultInvoice(UUID.randomUUID(), accountId, null, clock.getUTCToday(), targetDate, currency, false, InvoiceStatus.COMMITTED);
+
+        // Set the existing recurring invoice item 2013/06/15 - 2013/07/15
+        final LocalDate startDate = new LocalDate(2013, 06, 15);
+        final LocalDate endDate = new LocalDate(2013, 07, 15);
+        final InvoiceItem recurringInvoiceItem = new RecurringInvoiceItem(existingInvoice.getId(), accountId, subscription.getBundleId(),
+                                                                          subscription.getId(), plan.getName(), phase.getName(),
+                                                                          startDate, endDate, recurringPrice.getPrice(currency),
+                                                                          recurringPrice.getPrice(currency), Currency.USD);
+        existingInvoice.addInvoiceItem(recurringInvoiceItem);
+
+        // Set an existing repair item
+        final LocalDate repairStartDate = new LocalDate(2013, 06, 21);
+        final LocalDate repairEndDate = new LocalDate(2013, 06, 26);
+        final BigDecimal repairAmount = new BigDecimal("0.4900").negate();
+        final InvoiceItem repairItem = new RepairAdjInvoiceItem(existingInvoice.getId(), accountId, repairStartDate, repairEndDate,
+                                                                repairAmount, currency, recurringInvoiceItem.getId());
+        existingInvoice.addInvoiceItem(repairItem);
+
+        // Create the billing event associated with the subscription creation
+        //
+        // Note : this is the interesting part of the test; it does not provide the blocking billing events, which force invoice
+        // to un repair what was previously repaired.
+        final BillingEventSet events = new MockBillingEventSet();
+        final BillingEvent event = invoiceUtil.createMockBillingEvent(null, subscription, new DateTime("2013-06-15", DateTimeZone.UTC),
+                                                                      plan, phase,
+                                                                      null, recurringPrice.getPrice(currency), currency,
+                                                                      BillingPeriod.MONTHLY, 15, BillingMode.IN_ADVANCE, "testEvent", 1L,
+                                                                      SubscriptionBaseTransitionType.CREATE);
+        events.add(event);
+
+        final List<Invoice> existingInvoices = new LinkedList<Invoice>();
+        existingInvoices.add(existingInvoice);
+
+        // Generate a new invoice
+
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, existingInvoices, targetDate, currency, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
+        assertEquals(invoice.getNumberOfItems(), 7);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2013, 6, 15));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2013, 7, 15));
+
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.REPAIR_ADJ);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2013, 6, 15));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2013, 6, 21));
+
+        assertEquals(invoice.getInvoiceItems().get(2).getInvoiceItemType(), InvoiceItemType.REPAIR_ADJ);
+        assertEquals(invoice.getInvoiceItems().get(2).getStartDate(), new LocalDate(2013, 6, 26));
+        assertEquals(invoice.getInvoiceItems().get(2).getEndDate(), new LocalDate(2013, 7, 15));
+
+        assertEquals(invoice.getInvoiceItems().get(3).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(3).getStartDate(), new LocalDate(2013, 7, 15));
+        assertEquals(invoice.getInvoiceItems().get(3).getEndDate(), new LocalDate(2013, 8, 15));
+
+        assertEquals(invoice.getInvoiceItems().get(4).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(4).getStartDate(), new LocalDate(2013, 8, 15));
+        assertEquals(invoice.getInvoiceItems().get(4).getEndDate(), new LocalDate(2013, 9, 15));
+
+        assertEquals(invoice.getInvoiceItems().get(5).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(5).getStartDate(), new LocalDate(2013, 9, 15));
+        assertEquals(invoice.getInvoiceItems().get(5).getEndDate(), new LocalDate(2013, 10, 15));
+
+        assertEquals(invoice.getInvoiceItems().get(6).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(6).getStartDate(), new LocalDate(2013, 10, 15));
+        assertEquals(invoice.getInvoiceItems().get(6).getEndDate(), new LocalDate(2013, 11, 15));
+
+        // Add newly generated invoice to existing invoices
+        existingInvoices.add(invoice);
+
+        // Generate next invoice (no-op)
+        final InvoiceWithMetadata newInvoiceWithMetdata = generator.generateInvoice(account, events, existingInvoices, targetDate, currency, internalCallContext);
+        final Invoice newInvoice = newInvoiceWithMetdata.getInvoice();
+        assertNull(newInvoice);
+    }
+
+    @Test(groups = "fast")
+    public void testAutoInvoiceOffAccount() throws Exception {
+        final MockBillingEventSet events = new MockBillingEventSet();
+        events.setAccountInvoiceOff(true);
+
+        final SubscriptionBase sub = createSubscription();
+        final LocalDate startDate = invoiceUtil.buildDate(2011, 9, 1);
+
+        final Plan plan = new MockPlan();
+        final BigDecimal rate1 = TEN;
+        final PlanPhase phase = createMockMonthlyPlanPhase(rate1);
+
+        final BillingEvent event = createBillingEvent(sub.getId(), sub.getBundleId(), startDate, plan, phase, 1);
+        events.add(event);
+
+        final LocalDate targetDate = invoiceUtil.buildDate(2011, 10, 3);
+        final UUID accountId = UUID.randomUUID();
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+
+        assertNull(invoiceWithMetadata.getInvoice());
+    }
+
+    @Test(groups = "fast")
+    public void testAutoInvoiceOffWithCredits() throws CatalogApiException, InvoiceApiException {
+        final Currency currency = Currency.USD;
+        final List<Invoice> invoices = new ArrayList<Invoice>();
+        final MockBillingEventSet eventSet = new MockBillingEventSet();
+        final UUID accountId = UUID.randomUUID();
+        final UUID bundleId = UUID.randomUUID();
+
+        final LocalDate startDate = new LocalDate(2012, 1, 1);
+
+        // add first SubscriptionBase creation event
+        final UUID subscriptionId1 = UUID.randomUUID();
+        final Plan plan1 = new MockPlan();
+        final PlanPhase plan1phase1 = createMockMonthlyPlanPhase(FIFTEEN, null, PhaseType.DISCOUNT);
+        final BillingEvent subscription1creation = createBillingEvent(subscriptionId1, bundleId, startDate, plan1, plan1phase1, 1);
+        eventSet.add(subscription1creation);
+
+        // add second SubscriptionBase creation event
+        final UUID subscriptionId2 = UUID.randomUUID();
+        final Plan plan2 = new MockPlan();
+        final PlanPhase plan2phase1 = createMockMonthlyPlanPhase(TWELVE, null, PhaseType.EVERGREEN);
+        eventSet.add(createBillingEvent(subscriptionId2, bundleId, startDate, plan2, plan2phase1, 1));
+
+        // generate the first invoice
+        final InvoiceWithMetadata invoiceWithMetadata1 = generator.generateInvoice(account, eventSet, invoices, startDate, currency, internalCallContext);
+        final Invoice invoice1 = invoiceWithMetadata1.getInvoice();
+        assertNotNull(invoice1);
+        assertTrue(invoice1.getBalance().compareTo(FIFTEEN.add(TWELVE)) == 0);
+        invoices.add(invoice1);
+
+        // set auto invoice off for first SubscriptionBase (i.e. remove event from BillingEventSet and add SubscriptionBase id to the list
+        // generate invoice
+        eventSet.remove(subscription1creation);
+        eventSet.addSubscriptionWithAutoInvoiceOff(subscriptionId1);
+
+        final LocalDate targetDate2 = startDate.plusMonths(1);
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, eventSet, invoices, targetDate2, currency, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
+        assertNotNull(invoice2);
+        assertTrue(invoice2.getBalance().compareTo(TWELVE) == 0);
+        invoices.add(invoice2);
+
+        final LocalDate targetDate3 = targetDate2.plusMonths(1);
+        eventSet.clearSubscriptionsWithAutoInvoiceOff();
+        eventSet.add(subscription1creation);
+        final InvoiceWithMetadata invoiceWithMetadata3 = generator.generateInvoice(account, eventSet, invoices, targetDate3, currency, internalCallContext);
+        final Invoice invoice3 = invoiceWithMetadata3.getInvoice();
+        assertNotNull(invoice3);
+        assertTrue(invoice3.getBalance().compareTo(FIFTEEN.multiply(TWO).add(TWELVE)) == 0);
+    }
+
+    @Test(groups = "fast", description = "https://github.com/killbill/killbill/issues/654")
+    public void testCancelEOTWithFullItemAdjustment() throws CatalogApiException, InvoiceApiException {
+        final BigDecimal rate = new BigDecimal("39.95");
+
+        final BillingEventSet events = new MockBillingEventSet();
+
+        final SubscriptionBase sub = createSubscription();
+        final LocalDate startDate = invoiceUtil.buildDate(2016, 10, 9);
+        final LocalDate endDate = invoiceUtil.buildDate(2016, 11, 9);
+
+        final Plan plan = new MockPlan();
+        final PlanPhase phase = createMockMonthlyPlanPhase(rate);
+
+        final BillingEvent event = createBillingEvent(sub.getId(), sub.getBundleId(), startDate, plan, phase, 9);
+        events.add(event);
+
+        final LocalDate targetDate = invoiceUtil.buildDate(2016, 10, 9);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, null, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
+
+        assertNotNull(invoice);
+        assertEquals(invoice.getNumberOfItems(), 1);
+        assertEquals(invoice.getBalance(), KillBillMoney.of(rate, invoice.getCurrency()));
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), sub.getId());
+
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), startDate);
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), endDate);
+
+        // Cancel EOT and Add the item adjustment
+        final BillingEvent event2 = invoiceUtil.createMockBillingEvent(account, sub, endDate.toDateTimeAtStartOfDay(),
+                                                                       null, phase,
+                                                                       ZERO, null, Currency.USD, BillingPeriod.NO_BILLING_PERIOD, 9,
+                                                                       BillingMode.IN_ADVANCE, "Cancel", 2L,
+                                                                       SubscriptionBaseTransitionType.CANCEL);
+        events.add(event2);
+
+        final InvoiceItem itemAdj = new ItemAdjInvoiceItem(invoice.getInvoiceItems().get(0), new LocalDate(2016, 10, 12), rate.negate(), Currency.USD);
+
+        invoice.addInvoiceItem(itemAdj);
+
+        final List<Invoice> existingInvoices = new ArrayList<Invoice>();
+        existingInvoices.add(invoice);
+        final InvoiceWithMetadata invoiceWithMetadata2 = generator.generateInvoice(account, events, existingInvoices, targetDate, Currency.USD, internalCallContext);
+        final Invoice invoice2 = invoiceWithMetadata2.getInvoice();
+
+        assertNull(invoice2);
+    }
+
+    // Complex but plausible scenario, with multiple same-day changes, to verify bounds are not triggered
+    @Test(groups = "fast", description = "https://github.com/killbill/killbill/issues/664")
+    public void testMultipleDailyChangesDoNotTriggerBounds() throws InvoiceApiException, CatalogApiException {
+        final UUID accountId = UUID.randomUUID();
+        final UUID bundleId = UUID.randomUUID();
+        final UUID subscriptionId1 = UUID.randomUUID();
+
+        final BillingEventSet events = new MockBillingEventSet();
+        final List<Invoice> invoices = new ArrayList<Invoice>();
+        Invoice invoice;
+
+        final Plan plan1 = new MockPlan("plan1");
+        final PlanPhase plan1Phase1 = createMockMonthlyPlanPhase(null, EIGHT, PhaseType.TRIAL);
+        final PlanPhase plan1Phase2 = createMockMonthlyPlanPhase(TWELVE, PhaseType.DISCOUNT);
+        final LocalDate plan1StartDate = invoiceUtil.buildDate(2011, 1, 5);
+        final LocalDate plan1PhaseChangeDate = invoiceUtil.buildDate(2011, 4, 5);
+
+        final Plan plan2 = new MockPlan("plan2");
+        final PlanPhase plan2Phase1 = createMockMonthlyPlanPhase(null, TWENTY, PhaseType.TRIAL);
+        final PlanPhase plan2Phase2 = createMockMonthlyPlanPhase(THIRTY, PhaseType.DISCOUNT);
+        final PlanPhase plan2Phase3 = createMockMonthlyPlanPhase(FORTY, PhaseType.EVERGREEN);
+        final PlanPhase plan2Phase4 = createMockMonthlyPlanPhase();
+        final LocalDate plan2PhaseChangeToEvergreenDate = invoiceUtil.buildDate(2011, 6, 5);
+        final LocalDate plan2CancelDate = invoiceUtil.buildDate(2011, 6, 5);
+
+        // On 1/5/2011, start TRIAL on plan1
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1StartDate, plan1, plan1Phase1, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan1StartDate, 1, EIGHT);
+        invoice = invoices.get(0);
+        assertEquals(invoice.getInvoiceItems().size(), 1);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.FIXED);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 1, 5));
+        assertNull(invoice.getInvoiceItems().get(0).getEndDate());
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(EIGHT), 0);
+
+        // On 1/5/2011, change to TRIAL on plan2
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1StartDate, plan2, plan2Phase1, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan1StartDate, 1, TWENTY);
+        assertEquals(invoices.get(0), invoice);
+        invoice = invoices.get(1);
+        assertEquals(invoice.getInvoiceItems().size(), 1);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.FIXED);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 1, 5));
+        assertNull(invoice.getInvoiceItems().get(0).getEndDate());
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(TWENTY), 0);
+
+        // On 1/5/2011, change back to TRIAL on plan1
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1StartDate, plan1, plan1Phase1, 5));
+
+        // We don't repair FIXED items and one already exists for that date - nothing to generate
+        testNullInvoiceGeneration(events, invoices, plan1StartDate);
+
+        // On 4/5/2011, phase change to DISCOUNT on plan1
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1PhaseChangeDate, plan1, plan1Phase2, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan1PhaseChangeDate, 1, TWELVE);
+        assertEquals(invoices.get(1), invoice);
+        invoice = invoices.get(2);
+        assertEquals(invoice.getInvoiceItems().size(), 1);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(TWELVE), 0);
+
+        // On 4/5/2011, change to DISCOUNT on plan2
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1PhaseChangeDate, plan2, plan2Phase2, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan1PhaseChangeDate, 2, new BigDecimal("18"));
+        assertEquals(invoices.get(2), invoice);
+        invoice = invoices.get(3);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(THIRTY), 0);
+        assertEquals(invoice.getInvoiceItems().get(1).getLinkedItemId(), invoices.get(2).getInvoiceItems().get(0).getId());
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.REPAIR_ADJ);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getAmount().compareTo(TWELVE.negate()), 0);
+
+        // On 4/5/2011, change back to DISCOUNT on plan1
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1PhaseChangeDate, plan1, plan1Phase2, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan1PhaseChangeDate, 2, new BigDecimal("-18"));
+        assertEquals(invoices.get(3), invoice);
+        invoice = invoices.get(4);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(TWELVE), 0);
+        assertEquals(invoice.getInvoiceItems().get(1).getLinkedItemId(), invoices.get(3).getInvoiceItems().get(0).getId());
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.REPAIR_ADJ);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getAmount().compareTo(THIRTY.negate()), 0);
+
+        // On 4/5/2011, change back to DISCOUNT on plan2
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan1PhaseChangeDate, plan2, plan2Phase2, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan1PhaseChangeDate, 2, new BigDecimal("18"));
+        assertEquals(invoices.get(4), invoice);
+        invoice = invoices.get(5);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(THIRTY), 0);
+        assertEquals(invoice.getInvoiceItems().get(1).getLinkedItemId(), invoices.get(4).getInvoiceItems().get(0).getId());
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.REPAIR_ADJ);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2011, 4, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getAmount().compareTo(TWELVE.negate()), 0);
+
+        // On 6/5/2011, phase change to EVERGREEN on plan2
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan2PhaseChangeToEvergreenDate, plan2, plan2Phase3, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan2PhaseChangeToEvergreenDate, 2, new BigDecimal("70"));
+        assertEquals(invoices.get(5), invoice);
+        invoice = invoices.get(6);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 5, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 6, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(THIRTY), 0);
+        assertEquals(invoice.getInvoiceItems().get(1).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(1).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(1).getStartDate(), new LocalDate(2011, 6, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getEndDate(), new LocalDate(2011, 7, 5));
+        assertEquals(invoice.getInvoiceItems().get(1).getAmount().compareTo(FORTY), 0);
+
+        // On 6/5/2011, cancel subscription
+        events.add(createBillingEvent(subscriptionId1, bundleId, plan2CancelDate, plan2, plan2Phase4, 5));
+
+        testInvoiceGeneration(accountId, events, invoices, plan2PhaseChangeToEvergreenDate, 1, FORTY.negate());
+        assertEquals(invoices.get(6), invoice);
+        invoice = invoices.get(7);
+        assertEquals(invoice.getInvoiceItems().get(0).getLinkedItemId(), invoices.get(6).getInvoiceItems().get(1).getId());
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.REPAIR_ADJ);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 6, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 7, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(FORTY.negate()), 0);
+    }
+
+    @Test(groups = "fast", description = "https://github.com/killbill/killbill/issues/664")
+    public void testBuggyBillingEventsDoNotImpactInvoicing() throws InvoiceApiException, CatalogApiException {
+        final UUID accountId = UUID.randomUUID();
+        final UUID bundleId = UUID.randomUUID();
+        final UUID subscriptionId1 = UUID.randomUUID();
+
+        final BillingEventSet events = new MockBillingEventSet();
+        final List<Invoice> invoices = new ArrayList<Invoice>();
+        Invoice invoice;
+
+        final Plan plan1 = new MockPlan("plan1");
+        final PlanPhase plan1Phase1 = createMockMonthlyPlanPhase(null, EIGHT, PhaseType.TRIAL);
+        final PlanPhase plan1Phase2 = createMockMonthlyPlanPhase(TWELVE, PhaseType.EVERGREEN);
+        final LocalDate plan1StartDate = invoiceUtil.buildDate(2011, 1, 5);
+        final LocalDate plan1PhaseChangeDate = invoiceUtil.buildDate(2011, 2, 5);
+
+        // To simulate a bug, duplicate the billing events
+        for (int i = 0; i < 10; i++) {
+            events.add(createBillingEvent(subscriptionId1, bundleId, plan1StartDate, plan1, plan1Phase1, 5));
+            events.add(createBillingEvent(subscriptionId1, bundleId, plan1PhaseChangeDate, plan1, plan1Phase2, 5));
+        }
+        assertEquals(events.size(), 20);
+
+        // Fix for https://github.com/killbill/killbill/issues/467 will prevent duplicate fixed items
+        testInvoiceGeneration(accountId, events, invoices, plan1StartDate, 1, EIGHT);
+        invoice = invoices.get(0);
+        assertEquals(invoice.getInvoiceItems().size(), 1);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.FIXED);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 1, 5));
+        assertNull(invoice.getInvoiceItems().get(0).getEndDate());
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(EIGHT), 0);
+
+        // Intermediate billing intervals associated with recurring items will be less than a day, so only one recurring item will be generated
+        testInvoiceGeneration(accountId, events, invoices, plan1PhaseChangeDate, 1, TWELVE);
+        invoice = invoices.get(1);
+        assertEquals(invoice.getInvoiceItems().size(), 1);
+        assertEquals(invoice.getInvoiceItems().get(0).getSubscriptionId(), subscriptionId1);
+        assertEquals(invoice.getInvoiceItems().get(0).getInvoiceItemType(), InvoiceItemType.RECURRING);
+        assertEquals(invoice.getInvoiceItems().get(0).getStartDate(), new LocalDate(2011, 2, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getEndDate(), new LocalDate(2011, 3, 5));
+        assertEquals(invoice.getInvoiceItems().get(0).getAmount().compareTo(TWELVE), 0);
+    }
+
+    private Long totalOrdering = 1L;
+
+    private MockPlanPhase createMockThirtyDaysPlanPhase(@Nullable final BigDecimal recurringRate) {
+        return new MockPlanPhase(new MockInternationalPrice(new DefaultPrice(recurringRate, Currency.USD)),
+                                 null, BillingPeriod.THIRTY_DAYS);
     }
 
     private MockPlanPhase createMockMonthlyPlanPhase() {
@@ -757,23 +1337,36 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
                                  null, BillingPeriod.ANNUAL, phaseType);
     }
 
+    private SubscriptionBase createSubscription() {
+        return createSubscription(UUID.randomUUID(), UUID.randomUUID());
+    }
+
+    private SubscriptionBase createSubscription(final UUID subscriptionId, final UUID bundleId) {
+        final SubscriptionBase sub = Mockito.mock(SubscriptionBase.class);
+        Mockito.when(sub.getId()).thenReturn(subscriptionId);
+        Mockito.when(sub.getBundleId()).thenReturn(bundleId);
+
+        return sub;
+    }
+
     private BillingEvent createBillingEvent(final UUID subscriptionId, final UUID bundleId, final LocalDate startDate,
                                             final Plan plan, final PlanPhase planPhase, final int billCycleDayLocal) throws CatalogApiException {
         final SubscriptionBase sub = createSubscription(subscriptionId, bundleId);
         final Currency currency = Currency.USD;
 
         return invoiceUtil.createMockBillingEvent(null, sub, startDate.toDateTimeAtStartOfDay(), plan, planPhase,
-                                                  planPhase.getFixedPrice() == null ? null : planPhase.getFixedPrice().getPrice(currency),
-                                                  planPhase.getRecurringPrice() == null ? null : planPhase.getRecurringPrice().getPrice(currency),
-                                                  currency, planPhase.getBillingPeriod(),
-                                                  billCycleDayLocal, BillingModeType.IN_ADVANCE, "Test", 1L, SubscriptionBaseTransitionType.CREATE);
+                                                  planPhase.getFixed().getPrice() == null ? null : planPhase.getFixed().getPrice().getPrice(currency),
+                                                  planPhase.getRecurring().getRecurringPrice() == null ? null : planPhase.getRecurring().getRecurringPrice().getPrice(currency),
+                                                  currency, planPhase.getRecurring().getBillingPeriod(),
+                                                  billCycleDayLocal, BillingMode.IN_ADVANCE, "Test", totalOrdering++, SubscriptionBaseTransitionType.CREATE);
     }
 
     private void testInvoiceGeneration(final UUID accountId, final BillingEventSet events, final List<Invoice> existingInvoices,
                                        final LocalDate targetDate, final int expectedNumberOfItems,
                                        final BigDecimal expectedAmount) throws InvoiceApiException {
         final Currency currency = Currency.USD;
-        final Invoice invoice = generator.generateInvoice(accountId, events, existingInvoices, targetDate, currency);
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, existingInvoices, targetDate, currency, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
         assertNotNull(invoice);
         assertEquals(invoice.getNumberOfItems(), expectedNumberOfItems);
         existingInvoices.add(invoice);
@@ -782,121 +1375,11 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
         assertEquals(invoice.getBalance(), KillBillMoney.of(expectedAmount, invoice.getCurrency()));
     }
 
-    @Test(groups = "fast")
-    public void testWithFullRepairInvoiceGeneration() throws CatalogApiException, InvoiceApiException {
-        final LocalDate april25 = new LocalDate(2012, 4, 25);
-
-        // create a base plan on April 25th
-        final UUID accountId = UUID.randomUUID();
-        final SubscriptionBase baseSubscription = createSubscription();
-
-        final Plan basePlan = new MockPlan("base Plan");
-        final MockInternationalPrice price5 = new MockInternationalPrice(new DefaultPrice(FIVE, Currency.USD));
-        final MockInternationalPrice price10 = new MockInternationalPrice(new DefaultPrice(TEN, Currency.USD));
-        final MockInternationalPrice price20 = new MockInternationalPrice(new DefaultPrice(TWENTY, Currency.USD));
-        final PlanPhase basePlanEvergreen = new MockPlanPhase(price10, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
-
-        final BillingEventSet events = new MockBillingEventSet();
-        events.add(createBillingEvent(baseSubscription.getId(), baseSubscription.getBundleId(), april25, basePlan, basePlanEvergreen, 25));
-
-        // generate invoice
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, april25, Currency.USD);
-        assertNotNull(invoice1);
-        assertEquals(invoice1.getNumberOfItems(), 1);
-        assertEquals(invoice1.getBalance().compareTo(TEN), 0);
-
-        final List<Invoice> invoices = new ArrayList<Invoice>();
-        invoices.add(invoice1);
-
-        // create 2 add ons on April 28th
-        final LocalDate april28 = new LocalDate(2012, 4, 28);
-        final SubscriptionBase addOnSubscription1 = createSubscription();
-        final Plan addOn1Plan = new MockPlan("add on 1");
-        final PlanPhase addOn1PlanPhaseEvergreen = new MockPlanPhase(price5, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
-        events.add(createBillingEvent(addOnSubscription1.getId(), baseSubscription.getBundleId(), april28, addOn1Plan, addOn1PlanPhaseEvergreen, 25));
-
-        final SubscriptionBase addOnSubscription2 = createSubscription();
-        final Plan addOn2Plan = new MockPlan("add on 2");
-        final PlanPhase addOn2PlanPhaseEvergreen = new MockPlanPhase(price20, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
-        events.add(createBillingEvent(addOnSubscription2.getId(), baseSubscription.getBundleId(), april28, addOn2Plan, addOn2PlanPhaseEvergreen, 25));
-
-        // generate invoice
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, invoices, april28, Currency.USD);
-        invoices.add(invoice2);
-        assertNotNull(invoice2);
-        assertEquals(invoice2.getNumberOfItems(), 2);
-        assertEquals(invoice2.getBalance().compareTo(KillBillMoney.of(TWENTY_FIVE.multiply(new BigDecimal("0.9")), invoice2.getCurrency())), 0);
-
-        // perform a repair (change base plan; remove one add-on)
-        // event stream should include just two plans
-        final MockBillingEventSet newEvents = new MockBillingEventSet();
-        final Plan basePlan2 = new MockPlan("base plan 2");
-        final MockInternationalPrice price13 = new MockInternationalPrice(new DefaultPrice(THIRTEEN, Currency.USD));
-        final PlanPhase basePlan2Phase = new MockPlanPhase(price13, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
-        newEvents.add(createBillingEvent(baseSubscription.getId(), baseSubscription.getBundleId(), april25, basePlan2, basePlan2Phase, 25));
-        newEvents.add(createBillingEvent(addOnSubscription1.getId(), baseSubscription.getBundleId(), april28, addOn1Plan, addOn1PlanPhaseEvergreen, 25));
-
-        // generate invoice
-        final LocalDate may1 = new LocalDate(2012, 5, 1);
-        final Invoice invoice3 = generator.generateInvoice(accountId, newEvents, invoices, may1, Currency.USD);
-        assertNotNull(invoice3);
-        assertEquals(invoice3.getNumberOfItems(), 3);
-        // -4.50 -18 - 10 (to correct the previous 2 invoices) + 4.50 + 13
-        assertEquals(invoice3.getBalance().compareTo(FIFTEEN.negate()), 0);
-    }
-
-    @Test(groups = "fast")
-    public void testRepairForPaidInvoice() throws CatalogApiException, InvoiceApiException {
-        // create an invoice
-        final LocalDate april25 = new LocalDate(2012, 4, 25);
-
-        // create a base plan on April 25th
-        final UUID accountId = UUID.randomUUID();
-        final SubscriptionBase originalSubscription = createSubscription();
-
-        final Plan originalPlan = new MockPlan("original plan");
-        final MockInternationalPrice price10 = new MockInternationalPrice(new DefaultPrice(TEN, Currency.USD));
-        final PlanPhase originalPlanEvergreen = new MockPlanPhase(price10, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
-
-        final BillingEventSet events = new MockBillingEventSet();
-        events.add(createBillingEvent(originalSubscription.getId(), originalSubscription.getBundleId(), april25, originalPlan, originalPlanEvergreen, 25));
-
-        final Invoice invoice1 = generator.generateInvoice(accountId, events, null, april25, Currency.USD);
-
-        printDetailInvoice(invoice1);
-
-        assertEquals(invoice1.getNumberOfItems(), 1);
-        final List<Invoice> invoices = new ArrayList<Invoice>();
-        invoices.add(invoice1);
-
-        // pay the invoice
-        invoice1.addPayment(new DefaultInvoicePayment(InvoicePaymentType.ATTEMPT, UUID.randomUUID(), invoice1.getId(), april25.toDateTimeAtCurrentTime(), TEN,
-                                                      Currency.USD, Currency.USD));
-        assertEquals(invoice1.getBalance().compareTo(ZERO), 0);
-
-        // change the plan (i.e. repair) on start date
-        events.clear();
-        final SubscriptionBase newSubscription = createSubscription();
-        final Plan newPlan = new MockPlan("new plan");
-        final MockInternationalPrice price5 = new MockInternationalPrice(new DefaultPrice(FIVE, Currency.USD));
-        final PlanPhase newPlanEvergreen = new MockPlanPhase(price5, null, BillingPeriod.MONTHLY, PhaseType.EVERGREEN);
-        events.add(createBillingEvent(newSubscription.getId(), originalSubscription.getBundleId(), april25, newPlan, newPlanEvergreen, 25));
-
-        // generate a new invoice
-        final Invoice invoice2 = generator.generateInvoice(accountId, events, invoices, april25, Currency.USD);
-
-        printDetailInvoice(invoice2);
-        assertEquals(invoice2.getNumberOfItems(), 2);
-        invoices.add(invoice2);
-
-        // move items to the correct invoice (normally, the dao calls will sort that out)
-        distributeItems(invoices);
-
-        // ensure that the original invoice balance is zero
-        assertEquals(invoice1.getBalance().compareTo(new BigDecimal("-10.0")), 0);
-
-        // ensure that the account balance is correct
-        assertEquals(invoice2.getBalance().compareTo(FIVE), 0);
+    private void testNullInvoiceGeneration(final BillingEventSet events, final List<Invoice> existingInvoices, final LocalDate targetDate) throws InvoiceApiException {
+        final Currency currency = Currency.USD;
+        final InvoiceWithMetadata invoiceWithMetadata = generator.generateInvoice(account, events, existingInvoices, targetDate, currency, internalCallContext);
+        final Invoice invoice = invoiceWithMetadata.getInvoice();
+        assertNull(invoice);
     }
 
     private void distributeItems(final List<Invoice> invoices) {
@@ -923,75 +1406,6 @@ public class TestDefaultInvoiceGenerator extends InvoiceTestSuiteNoDB {
                 }
             }
         }
-    }
-
-    @Test(groups = "fast")
-    public void testAutoInvoiceOffAccount() throws Exception {
-        final MockBillingEventSet events = new MockBillingEventSet();
-        events.setAccountInvoiceOff(true);
-
-        final SubscriptionBase sub = createSubscription();
-        final LocalDate startDate = invoiceUtil.buildDate(2011, 9, 1);
-
-        final Plan plan = new MockPlan();
-        final BigDecimal rate1 = TEN;
-        final PlanPhase phase = createMockMonthlyPlanPhase(rate1);
-
-        final BillingEvent event = createBillingEvent(sub.getId(), sub.getBundleId(), startDate, plan, phase, 1);
-        events.add(event);
-
-        final LocalDate targetDate = invoiceUtil.buildDate(2011, 10, 3);
-        final UUID accountId = UUID.randomUUID();
-        final Invoice invoice = generator.generateInvoice(accountId, events, null, targetDate, Currency.USD);
-
-        assertNull(invoice);
-    }
-
-    public void testAutoInvoiceOffWithCredits() throws CatalogApiException, InvoiceApiException {
-        final Currency currency = Currency.USD;
-        final List<Invoice> invoices = new ArrayList<Invoice>();
-        final MockBillingEventSet eventSet = new MockBillingEventSet();
-        final UUID accountId = UUID.randomUUID();
-        final UUID bundleId = UUID.randomUUID();
-
-        final LocalDate startDate = new LocalDate(2012, 1, 1);
-
-        // add first SubscriptionBase creation event
-        final UUID subscriptionId1 = UUID.randomUUID();
-        final Plan plan1 = new MockPlan();
-        final PlanPhase plan1phase1 = createMockMonthlyPlanPhase(FIFTEEN, null, PhaseType.DISCOUNT);
-        final BillingEvent subscription1creation = createBillingEvent(subscriptionId1, bundleId, startDate, plan1, plan1phase1, 1);
-        eventSet.add(subscription1creation);
-
-        // add second SubscriptionBase creation event
-        final UUID subscriptionId2 = UUID.randomUUID();
-        final Plan plan2 = new MockPlan();
-        final PlanPhase plan2phase1 = createMockMonthlyPlanPhase(TWELVE, null, PhaseType.EVERGREEN);
-        eventSet.add(createBillingEvent(subscriptionId2, bundleId, startDate, plan2, plan2phase1, 1));
-
-        // generate the first invoice
-        final Invoice invoice1 = generator.generateInvoice(accountId, eventSet, invoices, startDate, currency);
-        assertNotNull(invoice1);
-        assertTrue(invoice1.getBalance().compareTo(FIFTEEN.add(TWELVE)) == 0);
-        invoices.add(invoice1);
-
-        // set auto invoice off for first SubscriptionBase (i.e. remove event from BillingEventSet and add SubscriptionBase id to the list
-        // generate invoice
-        eventSet.remove(subscription1creation);
-        eventSet.addSubscriptionWithAutoInvoiceOff(subscriptionId1);
-
-        final LocalDate targetDate2 = startDate.plusMonths(1);
-        final Invoice invoice2 = generator.generateInvoice(accountId, eventSet, invoices, targetDate2, currency);
-        assertNotNull(invoice2);
-        assertTrue(invoice2.getBalance().compareTo(TWELVE) == 0);
-        invoices.add(invoice2);
-
-        final LocalDate targetDate3 = targetDate2.plusMonths(1);
-        eventSet.clearSubscriptionsWithAutoInvoiceOff();
-        eventSet.add(subscription1creation);
-        final Invoice invoice3 = generator.generateInvoice(accountId, eventSet, invoices, targetDate3, currency);
-        assertNotNull(invoice3);
-        assertTrue(invoice3.getBalance().compareTo(FIFTEEN.multiply(TWO).add(TWELVE)) == 0);
     }
 
     private void printDetailInvoice(final Invoice invoice) {

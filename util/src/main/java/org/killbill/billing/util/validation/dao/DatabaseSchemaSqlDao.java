@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,16 +24,15 @@ import java.util.List;
 
 import javax.annotation.Nullable;
 
+import org.killbill.billing.util.entity.dao.EntitySqlDaoStringTemplate;
+import org.killbill.billing.util.validation.DefaultColumnInfo;
 import org.skife.jdbi.v2.StatementContext;
 import org.skife.jdbi.v2.sqlobject.Bind;
 import org.skife.jdbi.v2.sqlobject.SqlQuery;
 import org.skife.jdbi.v2.sqlobject.customizers.RegisterMapper;
-import org.skife.jdbi.v2.sqlobject.stringtemplate.UseStringTemplate3StatementLocator;
 import org.skife.jdbi.v2.tweak.ResultSetMapper;
 
-import org.killbill.billing.util.validation.DefaultColumnInfo;
-
-@UseStringTemplate3StatementLocator
+@EntitySqlDaoStringTemplate
 @RegisterMapper(DatabaseSchemaSqlDao.ColumnInfoMapper.class)
 public interface DatabaseSchemaSqlDao {
 
@@ -44,10 +45,21 @@ public interface DatabaseSchemaSqlDao {
         public DefaultColumnInfo map(final int index, final ResultSet r, final StatementContext ctx) throws SQLException {
             final String tableName = r.getString("table_name");
             final String columnName = r.getString("column_name");
-            final Integer scale = r.getInt("numeric_scale");
-            final Integer precision = r.getInt("numeric_precision");
-            final boolean isNullable = r.getBoolean("is_nullable");
-            final Integer maximumLength = r.getInt("character_maximum_length");
+            final Long scale = r.getLong("numeric_scale");
+            final Long precision = r.getLong("numeric_precision");
+
+            // Special handling for PostgreSQL - the implementation of AbstractJdbc2ResultSet#getBoolean doesn't support YES/NO
+            final String isNullableString = r.getString("is_nullable");
+            final boolean isNullable;
+            if ("YES".equalsIgnoreCase(isNullableString)) {
+                isNullable = true;
+            } else if ("NO".equalsIgnoreCase(isNullableString)) {
+                isNullable = false;
+            } else {
+                isNullable = r.getBoolean("is_nullable");
+            }
+
+            final Long maximumLength = r.getLong("character_maximum_length");
             final String dataType = r.getString("data_type");
 
             return new DefaultColumnInfo(tableName, columnName, scale, precision, isNullable, maximumLength, dataType);

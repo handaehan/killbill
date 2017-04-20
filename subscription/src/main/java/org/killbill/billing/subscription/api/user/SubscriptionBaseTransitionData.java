@@ -33,13 +33,14 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
     private final Long totalOrdering;
     private final UUID subscriptionId;
     private final UUID bundleId;
+    private final String bundleExternalKey;
     private final UUID eventId;
     private final EventType eventType;
     private final ApiEventType apiEventType;
-    private final DateTime requestedTransitionTime;
     private final DateTime effectiveTransitionTime;
     private final EntitlementState previousState;
     private final PriceList previousPriceList;
+    private final Integer previousBillingCycleDayLocal;
     private final UUID previousEventId;
     private final DateTime previousEventCreatedDate;
     private final Plan previousPlan;
@@ -48,6 +49,7 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
     private final DateTime nextEventCreatedDate;
     private final EntitlementState nextState;
     private final PriceList nextPriceList;
+    private final Integer nextBillingCycleDayLocal;
     private final Plan nextPlan;
     private final PlanPhase nextPhase;
     private final Boolean isFromDisk;
@@ -58,9 +60,9 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
     public SubscriptionBaseTransitionData(final UUID eventId,
                                           final UUID subscriptionId,
                                           final UUID bundleId,
+                                          final String bundleExternalKey,
                                           final EventType eventType,
                                           final ApiEventType apiEventType,
-                                          final DateTime requestedTransitionTime,
                                           final DateTime effectiveTransitionTime,
                                           final UUID previousEventId,
                                           final DateTime previousEventCreatedDate,
@@ -68,12 +70,14 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
                                           final Plan previousPlan,
                                           final PlanPhase previousPhase,
                                           final PriceList previousPriceList,
+                                          final Integer previousBillingCycleDayLocal,
                                           final UUID nextEventId,
                                           final DateTime nextEventCreatedDate,
                                           final EntitlementState nextState,
                                           final Plan nextPlan,
                                           final PlanPhase nextPhase,
                                           final PriceList nextPriceList,
+                                          final Integer nextBillingCycleDayLocal,
                                           final Long totalOrdering,
                                           final DateTime createdDate,
                                           final UUID userToken,
@@ -81,17 +85,19 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         this.eventId = eventId;
         this.subscriptionId = subscriptionId;
         this.bundleId = bundleId;
+        this.bundleExternalKey = bundleExternalKey;
         this.eventType = eventType;
         this.apiEventType = apiEventType;
-        this.requestedTransitionTime = requestedTransitionTime;
         this.effectiveTransitionTime = effectiveTransitionTime;
         this.previousState = previousState;
         this.previousPriceList = previousPriceList;
+        this.previousBillingCycleDayLocal = previousBillingCycleDayLocal;
         this.previousPlan = previousPlan;
         this.previousPhase = previousPhase;
         this.nextState = nextState;
         this.nextPlan = nextPlan;
         this.nextPriceList = nextPriceList;
+        this.nextBillingCycleDayLocal = nextBillingCycleDayLocal;
         this.nextPhase = nextPhase;
         this.totalOrdering = totalOrdering;
         this.previousEventId = previousEventId;
@@ -114,14 +120,15 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         this.eventId = input.getId();
         this.subscriptionId = input.getSubscriptionId();
         this.bundleId = input.getBundleId();
+        this.bundleExternalKey = input.getBundleExternalKey();
         this.eventType = eventType;
         this.apiEventType = apiEventType;
-        this.requestedTransitionTime = input.getRequestedTransitionTime();
         this.effectiveTransitionTime = input.getEffectiveTransitionTime();
         this.previousEventId = input.getPreviousEventId();
         this.previousEventCreatedDate = input.getPreviousEventCreatedDate();
         this.previousState = input.getPreviousState();
         this.previousPriceList = input.getPreviousPriceList();
+        this.previousBillingCycleDayLocal = input.getPreviousBillingCycleDayLocal();
         this.previousPlan = input.getPreviousPlan();
         this.previousPhase = input.getPreviousPhase();
         this.nextEventId = input.getNextEventId();
@@ -129,6 +136,7 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         this.nextState = input.getNextState();
         this.nextPlan = input.getNextPlan();
         this.nextPriceList = input.getNextPriceList();
+        this.nextBillingCycleDayLocal = input.getNextBillingCycleDayLocal();
         this.nextPhase = input.getNextPhase();
         this.totalOrdering = input.getTotalOrdering();
         this.isFromDisk = input.isFromDisk();
@@ -150,6 +158,10 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
     @Override
     public UUID getBundleId() {
         return bundleId;
+    }
+
+    public String getBundleExternalKey() {
+        return bundleExternalKey;
     }
 
     @Override
@@ -212,6 +224,16 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         return nextPriceList;
     }
 
+    @Override
+    public Integer getPreviousBillingCycleDayLocal() {
+        return previousBillingCycleDayLocal;
+    }
+
+    @Override
+    public Integer getNextBillingCycleDayLocal() {
+        return nextBillingCycleDayLocal;
+    }
+
     public UUID getUserToken() {
         return userToken;
     }
@@ -231,6 +253,8 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
                 return apiEventType.getSubscriptionTransitionType();
             case PHASE:
                 return SubscriptionBaseTransitionType.PHASE;
+            case BCD_UPDATE:
+                return SubscriptionBaseTransitionType.BCD_CHANGE;
             default:
                 throw new SubscriptionBaseError("Unexpected event type " + eventType);
         }
@@ -238,11 +262,6 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
     @Override
     public DateTime getCreatedDate() {
         return createdDate;
-    }
-
-    @Override
-    public DateTime getRequestedTransitionTime() {
-        return requestedTransitionTime;
     }
 
     @Override
@@ -274,16 +293,18 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         sb.append(", totalOrdering=").append(totalOrdering);
         sb.append(", subscriptionId=").append(subscriptionId);
         sb.append(", bundleId=").append(bundleId);
+        sb.append(", bundleExternalKey=").append(bundleExternalKey);
         sb.append(", eventId=").append(eventId);
         sb.append(", eventType=").append(eventType);
-        sb.append(", requestedTransitionTime=").append(requestedTransitionTime);
         sb.append(", effectiveTransitionTime=").append(effectiveTransitionTime);
         sb.append(", previousState=").append(previousState);
         sb.append(", previousPriceList=").append(previousPriceList);
+        sb.append(", previousBillingCycleDayLocal=").append(previousBillingCycleDayLocal);
         sb.append(", previousPlan=").append(previousPlan);
         sb.append(", previousPhase=").append(previousPhase);
         sb.append(", nextState=").append(nextState);
         sb.append(", nextPriceList=").append(nextPriceList);
+        sb.append(", nextBillingCycleDayLocal=").append(nextBillingCycleDayLocal);
         sb.append(", nextPlan=").append(nextPlan);
         sb.append(", nextPhase=").append(nextPhase);
         sb.append(", isFromDisk=").append(isFromDisk);
@@ -310,6 +331,9 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         if (bundleId != null ? !bundleId.equals(that.bundleId) : that.bundleId != null) {
             return false;
         }
+        if (bundleExternalKey != null ? !bundleExternalKey.equals(that.bundleExternalKey) : that.bundleExternalKey != null) {
+            return false;
+        }
         if (effectiveTransitionTime != null ? effectiveTransitionTime.compareTo(that.effectiveTransitionTime) != 0 : that.effectiveTransitionTime != null) {
             return false;
         }
@@ -331,6 +355,9 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         if (nextPriceList != null ? !nextPriceList.equals(that.nextPriceList) : that.nextPriceList != null) {
             return false;
         }
+        if (nextBillingCycleDayLocal != null ? !nextBillingCycleDayLocal.equals(that.nextBillingCycleDayLocal) : that.nextBillingCycleDayLocal != null) {
+            return false;
+        }
         if (nextState != that.nextState) {
             return false;
         }
@@ -343,13 +370,13 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         if (previousPriceList != null ? !previousPriceList.equals(that.previousPriceList) : that.previousPriceList != null) {
             return false;
         }
+        if (previousBillingCycleDayLocal != null ? !previousBillingCycleDayLocal.equals(that.previousBillingCycleDayLocal) : that.previousBillingCycleDayLocal != null) {
+            return false;
+        }
         if (previousState != that.previousState) {
             return false;
         }
         if (remainingEventsForUserOperation != null ? !remainingEventsForUserOperation.equals(that.remainingEventsForUserOperation) : that.remainingEventsForUserOperation != null) {
-            return false;
-        }
-        if (requestedTransitionTime != null ? requestedTransitionTime.compareTo(that.requestedTransitionTime) != 0 : that.requestedTransitionTime != null) {
             return false;
         }
         if (subscriptionId != null ? !subscriptionId.equals(that.subscriptionId) : that.subscriptionId != null) {
@@ -361,7 +388,6 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         if (userToken != null ? !userToken.equals(that.userToken) : that.userToken != null) {
             return false;
         }
-
         return true;
     }
 
@@ -370,17 +396,19 @@ public class SubscriptionBaseTransitionData implements SubscriptionBaseTransitio
         int result = totalOrdering != null ? totalOrdering.hashCode() : 0;
         result = 31 * result + (subscriptionId != null ? subscriptionId.hashCode() : 0);
         result = 31 * result + (bundleId != null ? bundleId.hashCode() : 0);
+        result = 31 * result + (bundleExternalKey != null ? bundleExternalKey.hashCode() : 0);
         result = 31 * result + (eventId != null ? eventId.hashCode() : 0);
         result = 31 * result + (eventType != null ? eventType.hashCode() : 0);
         result = 31 * result + (apiEventType != null ? apiEventType.hashCode() : 0);
-        result = 31 * result + (requestedTransitionTime != null ? requestedTransitionTime.hashCode() : 0);
         result = 31 * result + (effectiveTransitionTime != null ? effectiveTransitionTime.hashCode() : 0);
         result = 31 * result + (previousState != null ? previousState.hashCode() : 0);
         result = 31 * result + (previousPriceList != null ? previousPriceList.hashCode() : 0);
+        result = 31 * result + (previousBillingCycleDayLocal != null ? previousBillingCycleDayLocal.hashCode() : 0);
         result = 31 * result + (previousPlan != null ? previousPlan.hashCode() : 0);
         result = 31 * result + (previousPhase != null ? previousPhase.hashCode() : 0);
         result = 31 * result + (nextState != null ? nextState.hashCode() : 0);
         result = 31 * result + (nextPriceList != null ? nextPriceList.hashCode() : 0);
+        result = 31 * result + (nextBillingCycleDayLocal != null ? nextBillingCycleDayLocal.hashCode() : 0);
         result = 31 * result + (nextPlan != null ? nextPlan.hashCode() : 0);
         result = 31 * result + (nextPhase != null ? nextPhase.hashCode() : 0);
         result = 31 * result + (isFromDisk != null ? isFromDisk.hashCode() : 0);

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2012 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -21,21 +23,20 @@ import java.util.UUID;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
-import org.skife.jdbi.v2.IDBI;
-
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.util.cache.Cachable.CacheType;
 import org.killbill.billing.util.dao.NonEntityDao;
-
-import net.sf.ehcache.CacheException;
-import net.sf.ehcache.loader.CacheLoader;
+import org.skife.jdbi.v2.Handle;
 
 @Singleton
-public class RecordIdCacheLoader extends BaseCacheLoader implements CacheLoader {
+public class RecordIdCacheLoader extends BaseIdCacheLoader<Long> {
+
+    private final NonEntityDao nonEntityDao;
 
     @Inject
-    public RecordIdCacheLoader(final IDBI dbi, final NonEntityDao nonEntityDao) {
-        super(dbi, nonEntityDao);
+    public RecordIdCacheLoader(final NonEntityDao nonEntityDao) {
+        super();
+        this.nonEntityDao = nonEntityDao;
     }
 
     @Override
@@ -44,19 +45,7 @@ public class RecordIdCacheLoader extends BaseCacheLoader implements CacheLoader 
     }
 
     @Override
-    public Object load(final Object key, final Object argument) throws CacheException {
-        checkCacheLoaderStatus();
-
-        if (!(key instanceof String)) {
-            throw new IllegalArgumentException("Unexpected key type of " + key.getClass().getName());
-        }
-        if (!(argument instanceof CacheLoaderArgument)) {
-            throw new IllegalArgumentException("Unexpected key type of " + argument.getClass().getName());
-        }
-
-        final String objectId = (String) key;
-        final ObjectType objectType = ((CacheLoaderArgument) argument).getObjectType();
-
-        return nonEntityDao.retrieveRecordIdFromObject(UUID.fromString(objectId), objectType, null);
+    protected Long doRetrieveOperation(final String rawKey, final ObjectType objectType, final Handle handle) {
+        return nonEntityDao.retrieveRecordIdFromObjectInTransaction(UUID.fromString(rawKey), objectType, null, handle);
     }
 }

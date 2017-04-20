@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2014 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -22,15 +24,14 @@ import java.util.UUID;
 import org.joda.time.DateTime;
 import org.joda.time.Days;
 import org.joda.time.LocalDate;
-
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.invoice.api.InvoiceItem;
 import org.killbill.billing.invoice.generator.InvoiceDateUtils;
 import org.killbill.billing.invoice.model.RecurringInvoiceItem;
 import org.killbill.billing.invoice.model.RepairAdjInvoiceItem;
-import org.killbill.billing.util.currency.KillBillMoney;
 
-import com.google.common.base.Objects;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 
 /**
@@ -45,6 +46,7 @@ public class Item {
     private final UUID accountId;
     private final UUID bundleId;
     private final UUID subscriptionId;
+    private final UUID targetInvoiceId;
     private final UUID invoiceId;
     private final String planName;
     private final String phaseName;
@@ -71,6 +73,7 @@ public class Item {
         this.accountId = item.accountId;
         this.bundleId = item.bundleId;
         this.subscriptionId = item.subscriptionId;
+        this.targetInvoiceId = item.targetInvoiceId;
         this.invoiceId = item.invoiceId;
         this.planName = item.planName;
         this.phaseName = item.phaseName;
@@ -88,16 +91,21 @@ public class Item {
         this.action = action;
     }
 
-    public Item(final InvoiceItem item, final ItemAction action) {
+    public Item(final InvoiceItem item, final UUID targetInvoiceId, final ItemAction action) {
+        this(item, item.getStartDate(), item.getEndDate(), targetInvoiceId, action);
+    }
+
+    public Item(final InvoiceItem item, final LocalDate startDate, final LocalDate endDate, final UUID targetInvoiceId, final ItemAction action) {
         this.id = item.getId();
         this.accountId = item.getAccountId();
         this.bundleId = item.getBundleId();
         this.subscriptionId = item.getSubscriptionId();
+        this.targetInvoiceId = targetInvoiceId;
         this.invoiceId = item.getInvoiceId();
         this.planName = item.getPlanName();
         this.phaseName = item.getPhaseName();
-        this.startDate = item.getStartDate();
-        this.endDate = item.getEndDate();
+        this.startDate = startDate;
+        this.endDate = endDate;
         this.amount = item.getAmount().abs();
         this.rate = item.getRate();
         this.currency = item.getCurrency();
@@ -123,24 +131,28 @@ public class Item {
                                                                      .multiply(amount) : amount;
 
         if (action == ItemAction.ADD) {
-            return new RecurringInvoiceItem(id, createdDate, invoiceId, accountId, bundleId, subscriptionId, planName, phaseName, newStartDate, newEndDate, KillBillMoney.of(positiveAmount, currency), rate, currency);
+            return new RecurringInvoiceItem(id, createdDate, invoiceId, accountId, bundleId, subscriptionId, planName, phaseName, newStartDate, newEndDate, positiveAmount, rate, currency);
         } else {
             // We first compute the maximum amount after adjustment and that sets the amount limit of how much can be repaired.
-            final BigDecimal maxAvailableAmountAfterAdj = amount.subtract(adjustedAmount);
-            final BigDecimal maxAvailableAmountForRepair = maxAvailableAmountAfterAdj.subtract(currentRepairedAmount);
+            final BigDecimal maxAvailableAmountForRepair = getNetAmount();
             final BigDecimal positiveAmountForRepair = positiveAmount.compareTo(maxAvailableAmountForRepair) <= 0 ? positiveAmount : maxAvailableAmountForRepair;
-            return positiveAmountForRepair.compareTo(BigDecimal.ZERO) > 0 ? new RepairAdjInvoiceItem(invoiceId, accountId, newStartDate, newEndDate, KillBillMoney.of(positiveAmountForRepair.negate(), currency), currency, linkedId) : null;
+            return positiveAmountForRepair.compareTo(BigDecimal.ZERO) > 0 ? new RepairAdjInvoiceItem(targetInvoiceId, accountId, newStartDate, newEndDate, positiveAmountForRepair.negate(), currency, linkedId) : null;
         }
     }
 
     public void incrementAdjustedAmount(final BigDecimal increment) {
-        Preconditions.checkState(increment.compareTo(BigDecimal.ZERO) > 0);
+        Preconditions.checkState(increment.compareTo(BigDecimal.ZERO) > 0, "Invalid adjustment increment='%s', item=%s", increment, this);
         adjustedAmount = adjustedAmount.add(increment);
     }
 
     public void incrementCurrentRepairedAmount(final BigDecimal increment) {
-        Preconditions.checkState(increment.compareTo(BigDecimal.ZERO) > 0);
+        Preconditions.checkState(increment.compareTo(BigDecimal.ZERO) > 0, "Invalid repair increment='%s', item=%s", increment, this);
         currentRepairedAmount = currentRepairedAmount.add(increment);
+    }
+
+    @JsonIgnore
+    public BigDecimal getNetAmount() {
+        return amount.subtract(adjustedAmount).subtract(currentRepairedAmount);
     }
 
     public ItemAction getAction() {
@@ -181,13 +193,132 @@ public class Item {
 
         final InvoiceItem otherItem = other.toInvoiceItem();
 
-        return !id.equals(otherItem.getId()) &&
+        // See https://github.com/killbill/killbill/issues/286
+        return otherItem != null &&
+               !id.equals(otherItem.getId()) &&
                // Finally, for the tricky part... In case of complete repairs, the new invoiceItem will always meet all of the
                // following conditions: same type, subscription, start date. Depending on the catalog configuration, the end
                // date check could also match (e.g. repair from annual to monthly). For that scenario, we need to default
                // to catalog checks (the rate check is a lame check for versioned catalogs).
-               Objects.firstNonNull(planName, "").equals(Objects.firstNonNull(otherItem.getPlanName(), "")) &&
-               Objects.firstNonNull(phaseName, "").equals(Objects.firstNonNull(otherItem.getPhaseName(), "")) &&
-               Objects.firstNonNull(rate, BigDecimal.ZERO).compareTo(Objects.firstNonNull(otherItem.getRate(), BigDecimal.ZERO)) == 0;
+               MoreObjects.firstNonNull(planName, "").equals(MoreObjects.firstNonNull(otherItem.getPlanName(), "")) &&
+               MoreObjects.firstNonNull(phaseName, "").equals(MoreObjects.firstNonNull(otherItem.getPhaseName(), "")) &&
+               MoreObjects.firstNonNull(rate, BigDecimal.ZERO).compareTo(MoreObjects.firstNonNull(otherItem.getRate(), BigDecimal.ZERO)) == 0;
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("Item{");
+        sb.append("id=").append(id);
+        sb.append(", accountId=").append(accountId);
+        sb.append(", bundleId=").append(bundleId);
+        sb.append(", subscriptionId=").append(subscriptionId);
+        sb.append(", targetInvoiceId=").append(targetInvoiceId);
+        sb.append(", invoiceId=").append(invoiceId);
+        sb.append(", planName='").append(planName).append('\'');
+        sb.append(", phaseName='").append(phaseName).append('\'');
+        sb.append(", startDate=").append(startDate);
+        sb.append(", endDate=").append(endDate);
+        sb.append(", amount=").append(amount);
+        sb.append(", rate=").append(rate);
+        sb.append(", currency=").append(currency);
+        sb.append(", createdDate=").append(createdDate);
+        sb.append(", linkedId=").append(linkedId);
+        sb.append(", currentRepairedAmount=").append(currentRepairedAmount);
+        sb.append(", adjustedAmount=").append(adjustedAmount);
+        sb.append(", action=").append(action);
+        sb.append('}');
+        return sb.toString();
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        final Item item = (Item) o;
+
+        if (accountId != null ? !accountId.equals(item.accountId) : item.accountId != null) {
+            return false;
+        }
+        if (action != item.action) {
+            return false;
+        }
+        if (adjustedAmount != null ? adjustedAmount.compareTo(item.adjustedAmount) != 0 : item.adjustedAmount != null) {
+            return false;
+        }
+        if (amount != null ? amount.compareTo(item.amount) != 0 : item.amount != null) {
+            return false;
+        }
+        if (bundleId != null ? !bundleId.equals(item.bundleId) : item.bundleId != null) {
+            return false;
+        }
+        if (createdDate != null ? createdDate.compareTo(item.createdDate) != 0 : item.createdDate != null) {
+            return false;
+        }
+        if (currency != item.currency) {
+            return false;
+        }
+        if (currentRepairedAmount != null ? currentRepairedAmount.compareTo(item.currentRepairedAmount) != 0 : item.currentRepairedAmount != null) {
+            return false;
+        }
+        if (endDate != null ? endDate.compareTo(item.endDate) != 0 : item.endDate != null) {
+            return false;
+        }
+        if (id != null ? !id.equals(item.id) : item.id != null) {
+            return false;
+        }
+        if (invoiceId != null ? !invoiceId.equals(item.invoiceId) : item.invoiceId != null) {
+            return false;
+        }
+        if (linkedId != null ? !linkedId.equals(item.linkedId) : item.linkedId != null) {
+            return false;
+        }
+        if (phaseName != null ? !phaseName.equals(item.phaseName) : item.phaseName != null) {
+            return false;
+        }
+        if (planName != null ? !planName.equals(item.planName) : item.planName != null) {
+            return false;
+        }
+        if (rate != null ? rate.compareTo(item.rate) != 0 : item.rate != null) {
+            return false;
+        }
+        if (startDate != null ? startDate.compareTo(item.startDate) != 0 : item.startDate != null) {
+            return false;
+        }
+        if (subscriptionId != null ? !subscriptionId.equals(item.subscriptionId) : item.subscriptionId != null) {
+            return false;
+        }
+        if (targetInvoiceId != null ? !targetInvoiceId.equals(item.targetInvoiceId) : item.targetInvoiceId != null) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = id != null ? id.hashCode() : 0;
+        result = 31 * result + (accountId != null ? accountId.hashCode() : 0);
+        result = 31 * result + (bundleId != null ? bundleId.hashCode() : 0);
+        result = 31 * result + (subscriptionId != null ? subscriptionId.hashCode() : 0);
+        result = 31 * result + (targetInvoiceId != null ? targetInvoiceId.hashCode() : 0);
+        result = 31 * result + (invoiceId != null ? invoiceId.hashCode() : 0);
+        result = 31 * result + (planName != null ? planName.hashCode() : 0);
+        result = 31 * result + (phaseName != null ? phaseName.hashCode() : 0);
+        result = 31 * result + (startDate != null ? startDate.hashCode() : 0);
+        result = 31 * result + (endDate != null ? endDate.hashCode() : 0);
+        result = 31 * result + (amount != null ? amount.hashCode() : 0);
+        result = 31 * result + (rate != null ? rate.hashCode() : 0);
+        result = 31 * result + (currency != null ? currency.hashCode() : 0);
+        result = 31 * result + (createdDate != null ? createdDate.hashCode() : 0);
+        result = 31 * result + (linkedId != null ? linkedId.hashCode() : 0);
+        result = 31 * result + (currentRepairedAmount != null ? currentRepairedAmount.hashCode() : 0);
+        result = 31 * result + (adjustedAmount != null ? adjustedAmount.hashCode() : 0);
+        result = 31 * result + (action != null ? action.hashCode() : 0);
+        return result;
     }
 }

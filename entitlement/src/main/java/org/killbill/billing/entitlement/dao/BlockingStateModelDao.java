@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -19,16 +21,15 @@ package org.killbill.billing.entitlement.dao;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
-import org.killbill.billing.entity.EntityBase;
 import org.killbill.billing.junction.DefaultBlockingState;
 import org.killbill.billing.util.dao.TableName;
 import org.killbill.billing.util.entity.dao.EntityModelDao;
+import org.killbill.billing.util.entity.dao.EntityModelDaoBase;
 
-public class BlockingStateModelDao extends EntityBase implements EntityModelDao<BlockingState>{
+public class BlockingStateModelDao extends EntityModelDaoBase implements EntityModelDao<BlockingState> {
 
     private UUID blockableId;
     private BlockingStateType type;
@@ -39,6 +40,8 @@ public class BlockingStateModelDao extends EntityBase implements EntityModelDao<
     private Boolean blockBilling;
     private DateTime effectiveDate;
     private boolean isActive;
+
+    public BlockingStateModelDao() { /* For the DAO mapper */ }
 
     public BlockingStateModelDao(final UUID id, final UUID blockableId, final BlockingStateType blockingStateType, final String state, final String service, final Boolean blockChange, final Boolean blockEntitlement,
                                  final Boolean blockBilling, final DateTime effectiveDate, final boolean isActive, final DateTime createDate, final DateTime updateDate) {
@@ -140,12 +143,12 @@ public class BlockingStateModelDao extends EntityBase implements EntityModelDao<
         return isActive;
     }
 
-    public static BlockingState toBlockingState(BlockingStateModelDao src) {
+    public static BlockingState toBlockingState(final BlockingStateModelDao src) {
         if (src == null) {
             return null;
         }
         return new DefaultBlockingState(src.getId(), src.getBlockableId(), src.getType(), src.getState(), src.getService(), src.getBlockChange(), src.getBlockEntitlement(), src.getBlockBilling(),
-                                 src.getEffectiveDate(), src.getCreatedDate(), src.getUpdatedDate());
+                                        src.getEffectiveDate(), src.getCreatedDate(), src.getUpdatedDate(), src.getRecordId());
     }
 
     @Override

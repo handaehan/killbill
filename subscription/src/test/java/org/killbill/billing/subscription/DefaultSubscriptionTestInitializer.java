@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -20,23 +22,24 @@ import java.util.UUID;
 
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.killbill.billing.account.api.AccountData;
 import org.killbill.billing.api.TestApiListener;
 import org.killbill.billing.callcontext.InternalCallContext;
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.DefaultCatalogService;
 import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogService;
 import org.killbill.billing.catalog.api.Currency;
-import org.killbill.clock.ClockMock;
+import org.killbill.billing.lifecycle.api.BusService;
 import org.killbill.billing.mock.MockAccountBuilder;
 import org.killbill.billing.subscription.api.SubscriptionBaseInternalApi;
 import org.killbill.billing.subscription.api.SubscriptionBaseService;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
 import org.killbill.billing.subscription.engine.core.DefaultSubscriptionBaseService;
-import org.killbill.billing.util.svcsapi.bus.BusService;
+import org.killbill.billing.util.UUIDs;
+import org.killbill.clock.ClockMock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.testng.Assert.assertNotNull;
 
@@ -47,28 +50,27 @@ public class DefaultSubscriptionTestInitializer implements SubscriptionTestIniti
     protected static final Logger log = LoggerFactory.getLogger(DefaultSubscriptionTestInitializer.class);
 
     public DefaultSubscriptionTestInitializer() {
-
     }
 
-    public Catalog initCatalog(final CatalogService catalogService) throws Exception {
+    public Catalog initCatalog(final CatalogService catalogService, final InternalTenantContext context) throws Exception {
 
         ((DefaultCatalogService) catalogService).loadCatalog();
-        final Catalog catalog = catalogService.getFullCatalog();
+        final Catalog catalog = catalogService.getFullCatalog(true, true, context);
         assertNotNull(catalog);
         return catalog;
     }
 
     public AccountData initAccountData() {
-        final AccountData accountData = new MockAccountBuilder().name(UUID.randomUUID().toString())
+        final AccountData accountData = new MockAccountBuilder().name(UUIDs.randomUUID().toString().substring(1, 8))
                                                                 .firstNameLength(6)
-                                                                .email(UUID.randomUUID().toString())
-                                                                .phone(UUID.randomUUID().toString())
+                                                                .email(UUIDs.randomUUID().toString().substring(1, 8))
+                                                                .phone(UUIDs.randomUUID().toString().substring(1, 8))
                                                                 .migrated(false)
                                                                 .isNotifiedForInvoices(false)
-                                                                .externalKey(UUID.randomUUID().toString())
+                                                                .externalKey(UUIDs.randomUUID().toString())
                                                                 .billingCycleDayLocal(1)
                                                                 .currency(Currency.USD)
-                                                                .paymentMethodId(UUID.randomUUID())
+                                                                .paymentMethodId(UUIDs.randomUUID())
                                                                 .timeZone(DateTimeZone.forID("Europe/Paris"))
                                                                 .build();
 
@@ -76,17 +78,16 @@ public class DefaultSubscriptionTestInitializer implements SubscriptionTestIniti
         return accountData;
     }
 
-    public SubscriptionBaseBundle initBundle(final SubscriptionBaseInternalApi subscriptionApi, final InternalCallContext callContext) throws Exception {
-        final UUID accountId = UUID.randomUUID();
+    public SubscriptionBaseBundle initBundle(final UUID accountId, final SubscriptionBaseInternalApi subscriptionApi, final InternalCallContext callContext) throws Exception {
         final SubscriptionBaseBundle bundle = subscriptionApi.createBundleForAccount(accountId, DEFAULT_BUNDLE_KEY, callContext);
         assertNotNull(bundle);
         return bundle;
     }
 
-    public void startTestFamework(final TestApiListener testListener,
-                                  final ClockMock clock,
-                                  final BusService busService,
-                                  final SubscriptionBaseService subscriptionBaseService) throws Exception {
+    public void startTestFramework(final TestApiListener testListener,
+                                   final ClockMock clock,
+                                   final BusService busService,
+                                   final SubscriptionBaseService subscriptionBaseService) throws Exception {
         log.debug("STARTING TEST FRAMEWORK");
 
         resetTestListener(testListener);

@@ -82,10 +82,10 @@ public class TestTagApi extends TestIntegrationBase {
         final BillingPeriod term = BillingPeriod.ANNUAL;
         final String planSetName = PriceListSet.DEFAULT_PRICELIST_NAME;
 
-        final DefaultEntitlement bpEntitlement = createBaseEntitlementAndCheckForCompletion(account.getId(), "externalKey", productName, ProductCategory.BASE, term, NextEvent.CREATE, NextEvent.INVOICE);
+        final DefaultEntitlement bpEntitlement = createBaseEntitlementAndCheckForCompletion(account.getId(), "externalKey", productName, ProductCategory.BASE, term, NextEvent.CREATE, NextEvent.BLOCK, NextEvent.INVOICE);
         assertNotNull(bpEntitlement);
 
-        final List<Invoice> invoices = invoiceUserApi.getInvoicesByAccount(account.getId(), callContext);
+        final List<Invoice> invoices = invoiceUserApi.getInvoicesByAccount(account.getId(), false, callContext);
         Assert.assertEquals(invoices.size(), 1);
 
         final Invoice invoice = invoices.get(0);
@@ -99,7 +99,7 @@ public class TestTagApi extends TestIntegrationBase {
         assertListenerStatus();
 
         //
-        // Add 2 Tags on the invoice (1 control tag and 1 user tag)
+        // Add 2 Tags on the invoice (1 invoice tag and 1 user tag)
         //
         busHandler.pushExpectedEvents(NextEvent.TAG);
         tagUserApi.addTag(invoice.getId(), ObjectType.INVOICE, ControlTagType.WRITTEN_OFF.getId(), callContext);

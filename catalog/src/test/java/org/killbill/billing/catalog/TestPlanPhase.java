@@ -16,33 +16,34 @@
 
 package org.killbill.billing.catalog;
 
+import java.math.BigDecimal;
+
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.PhaseType;
-import org.killbill.billing.util.config.catalog.ValidationErrors;
+import org.killbill.xmlloader.ValidationErrors;
 
 public class TestPlanPhase extends CatalogTestSuiteNoDB {
 
     @Test(groups = "fast")
     public void testValidation() {
-        DefaultPlanPhase pp = MockPlanPhase.createUSDMonthlyEvergreen(null, "1.00").setPlan(MockPlan.createBicycleNoTrialEvergreen1USD());//new MockPlanPhase().setBillCycleDuration(BillingPeriod.MONTHLY).setRecurringPrice(null).setFixedPrice(new DefaultInternationalPrice());
+        final MockCatalog catalog = new MockCatalog();
 
-        ValidationErrors errors = pp.validate(new MockCatalog(), new ValidationErrors());
+        DefaultPlanPhase pp = MockPlanPhase.createUSDMonthlyEvergreen(null, "1.00").setPlan(MockPlan.createBicycleNoTrialEvergreen1USD());
+        pp.initialize(catalog, null);
+
+        ValidationErrors errors = pp.validate(catalog, new ValidationErrors());
         errors.log(log);
         Assert.assertEquals(errors.size(), 1);
 
-        pp = MockPlanPhase.createUSDMonthlyEvergreen("1.00", null).setBillCycleDuration(BillingPeriod.NO_BILLING_PERIOD).setPlan(MockPlan.createBicycleNoTrialEvergreen1USD());// new MockPlanPhase().setBillCycleDuration(BillingPeriod.NO_BILLING_PERIOD).setRecurringPrice(new MockInternationalPrice());
-        errors = pp.validate(new MockCatalog(), new ValidationErrors());
+        pp = MockPlanPhase.createUSDMonthlyEvergreen("1.00", null).setRecurring(new MockRecurring(BillingPeriod.NO_BILLING_PERIOD, MockInternationalPrice.createUSD("1.00")).setPhase(pp)).setPlan(MockPlan.createBicycleNoTrialEvergreen1USD());
+        pp.initialize(catalog, null);
+        errors = pp.validate(catalog, new ValidationErrors());
         errors.log(log);
-        Assert.assertEquals(errors.size(), 2);
-
-        pp = MockPlanPhase.createUSDMonthlyEvergreen(null, null).setBillCycleDuration(BillingPeriod.NO_BILLING_PERIOD).setPlan(MockPlan.createBicycleNoTrialEvergreen1USD());//new MockPlanPhase().setRecurringPrice(null).setFixedPrice(null).setBillCycleDuration(BillingPeriod.NO_BILLING_PERIOD);
-        errors = pp.validate(new MockCatalog(), new ValidationErrors());
-        errors.log(log);
-        Assert.assertEquals(errors.size(), 2);
+        Assert.assertEquals(errors.size(), 1);
     }
 
     @Test(groups = "fast")

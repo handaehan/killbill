@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2016 Groupon, Inc
+ * Copyright 2014-2016 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -17,10 +19,14 @@
 package org.killbill.billing.invoice;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 import java.util.UUID;
 
+import org.killbill.billing.catalog.api.BillingMode;
+import org.killbill.billing.catalog.api.Usage;
 import org.killbill.billing.junction.BillingEvent;
 import org.killbill.billing.junction.BillingEventSet;
 
@@ -29,7 +35,13 @@ public class MockBillingEventSet extends TreeSet<BillingEvent> implements Billin
     private static final long serialVersionUID = 1L;
 
     private boolean isAccountInvoiceOff;
-    private List<UUID> subscriptionIdsWithAutoInvoiceOff = new ArrayList<UUID>();
+    private List<UUID> subscriptionIdsWithAutoInvoiceOff;
+
+    public MockBillingEventSet() {
+        super();
+        this.isAccountInvoiceOff = false;
+        this.subscriptionIdsWithAutoInvoiceOff = new ArrayList<UUID>();
+    }
 
     public void addSubscriptionWithAutoInvoiceOff(final UUID subscriptionId) {
         subscriptionIdsWithAutoInvoiceOff.add(subscriptionId);
@@ -41,8 +53,18 @@ public class MockBillingEventSet extends TreeSet<BillingEvent> implements Billin
     }
 
     @Override
+    public BillingMode getRecurringBillingMode() {
+        return BillingMode.IN_ADVANCE;
+    }
+
+    @Override
     public List<UUID> getSubscriptionIdsWithAutoInvoiceOff() {
         return subscriptionIdsWithAutoInvoiceOff;
+    }
+
+    @Override
+    public Map<String, Usage> getUsages() {
+        return Collections.emptyMap();
     }
 
     public void setAccountInvoiceOff(final boolean isAccountInvoiceOff) {

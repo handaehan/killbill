@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -18,29 +20,30 @@ package org.killbill.billing.overdue;
 
 import javax.inject.Named;
 
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.BeforeMethod;
-
 import org.killbill.billing.GuicyKillbillTestSuiteWithEmbeddedDB;
-import org.killbill.bus.api.PersistentBus;
-import org.killbill.billing.overdue.notification.OverduePoster;
-import org.killbill.billing.overdue.calculator.BillingStateCalculator;
-import org.killbill.notificationq.api.NotificationQueueService;
-import org.killbill.billing.overdue.notification.OverdueNotifier;
+import org.killbill.billing.account.api.ImmutableAccountInternalApi;
+import org.killbill.billing.invoice.api.InvoiceInternalApi;
+import org.killbill.billing.junction.BlockingInternalApi;
+import org.killbill.billing.lifecycle.api.BusService;
+import org.killbill.billing.overdue.api.OverdueApi;
 import org.killbill.billing.overdue.applicator.OverdueBusListenerTester;
 import org.killbill.billing.overdue.applicator.OverdueStateApplicator;
+import org.killbill.billing.overdue.caching.OverdueConfigCache;
+import org.killbill.billing.overdue.calculator.BillingStateCalculator;
 import org.killbill.billing.overdue.glue.DefaultOverdueModule;
 import org.killbill.billing.overdue.glue.TestOverdueModuleWithEmbeddedDB;
+import org.killbill.billing.overdue.notification.OverdueNotifier;
+import org.killbill.billing.overdue.notification.OverduePoster;
 import org.killbill.billing.overdue.service.DefaultOverdueService;
 import org.killbill.billing.overdue.wrapper.OverdueWrapperFactory;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.dao.NonEntityDao;
-import org.killbill.billing.account.api.AccountInternalApi;
-import org.killbill.billing.invoice.api.InvoiceInternalApi;
-import org.killbill.billing.junction.BlockingInternalApi;
-import org.killbill.billing.util.svcsapi.bus.BusService;
+import org.killbill.bus.api.PersistentBus;
+import org.killbill.notificationq.api.NotificationQueueService;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeClass;
+import org.testng.annotations.BeforeMethod;
 
 import com.google.inject.Guice;
 import com.google.inject.Inject;
@@ -49,7 +52,7 @@ import com.google.inject.Injector;
 public abstract class OverdueTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuiteWithEmbeddedDB {
 
     @Inject
-    protected AccountInternalApi accountApi;
+    protected ImmutableAccountInternalApi accountApi;
     @Inject
     protected BillingStateCalculator calculatorBundle;
     @Inject
@@ -85,7 +88,7 @@ public abstract class OverdueTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
     @Inject
     protected OverdueStateApplicator applicator;
     @Inject
-    protected OverdueUserApi overdueApi;
+    protected OverdueApi overdueApi;
     @Inject
     protected OverdueProperties overdueProperties;
     @Inject
@@ -94,6 +97,8 @@ public abstract class OverdueTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
     protected NonEntityDao nonEntityDao;
     @Inject
     protected TestOverdueHelper testOverdueHelper;
+    @Inject
+    protected OverdueConfigCache overdueConfigCache;
 
     @BeforeClass(groups = "slow")
     protected void beforeClass() throws Exception {
@@ -107,6 +112,7 @@ public abstract class OverdueTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
         cacheControllerDispatcher.clearAll();
         bus.start();
         bus.register(listener);
+        service.loadConfig();
         service.initialize();
         service.start();
     }

@@ -27,7 +27,7 @@ import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.PlanAlignmentCreate;
 import org.killbill.billing.catalog.api.PlanSpecifier;
 import org.killbill.billing.catalog.api.ProductCategory;
-import org.killbill.billing.util.config.catalog.XMLLoader;
+import org.killbill.xmlloader.XMLLoader;
 
 import com.google.common.io.Resources;
 
@@ -38,15 +38,15 @@ public class TestLoadRules extends CatalogTestSuiteNoDB {
         final URI uri = new URI(Resources.getResource("WeaponsHireSmall.xml").toExternalForm());
         final StandaloneCatalog catalog = XMLLoader.getObjectFromUri(uri, StandaloneCatalog.class);
         Assert.assertNotNull(catalog);
-        final PlanRules rules = catalog.getPlanRules();
+        final DefaultPlanRules rules = catalog.getPlanRules();
 
-        final PlanSpecifier specifier = new PlanSpecifier("Laser-Scope", ProductCategory.ADD_ON, BillingPeriod.MONTHLY,
+        final PlanSpecifier specifier = new PlanSpecifier("Laser-Scope", BillingPeriod.MONTHLY,
                                                           "DEFAULT");
 
         final PlanAlignmentCreate alignment = rules.getPlanCreateAlignment(specifier, catalog);
         Assert.assertEquals(alignment, PlanAlignmentCreate.START_OF_SUBSCRIPTION);
 
-        final PlanSpecifier specifier2 = new PlanSpecifier("Extra-Ammo", ProductCategory.ADD_ON, BillingPeriod.MONTHLY,
+        final PlanSpecifier specifier2 = new PlanSpecifier("Extra-Ammo", BillingPeriod.MONTHLY,
                                                            "DEFAULT");
 
         final PlanAlignmentCreate alignment2 = rules.getPlanCreateAlignment(specifier2, catalog);
